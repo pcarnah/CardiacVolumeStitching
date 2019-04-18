@@ -1,0 +1,58 @@
+// Description: affine, MI, ASGD
+
+//ImageTypes
+(FixedInternalImagePixelType "float")
+(FixedImageDimension 3)
+(MovingInternalImagePixelType "float")
+(MovingImageDimension 3)
+
+//Components
+(Registration "MultiResolutionRegistration")
+(FixedImagePyramid "FixedSmoothingImagePyramid")
+(MovingImagePyramid "MovingSmoothingImagePyramid")
+(Interpolator "BSplineInterpolator")
+(Metric "AdvancedMattesMutualInformation")
+(Optimizer "AdaptiveStochasticGradientDescent")
+(ResampleInterpolator "FinalBSplineInterpolator")
+(Resampler "DefaultResampler")
+(Transform "EulerTransform")
+
+(ErodeMask "true" )
+
+(NumberOfResolutions 4)
+
+(HowToCombineTransforms "Compose")
+(AutomaticTransformInitialization "true")
+(AutomaticScalesEstimation "true")
+
+(WriteTransformParametersEachIteration "false")
+(WriteResultImageAfterEachResolution "false") 
+(ShowExactMetricValue "false")
+
+//Maximum number of iterations in each resolution level:
+(MaximumNumberOfIterations 300 ) 
+
+//Number of grey level bins in each resolution level:
+(NumberOfHistogramBins 32 )
+
+//Number of spatial samples used to compute the mutual information in each resolution level:
+(ImageSampler "RandomCoordinate")
+(UseRandomSampleRegion "false")
+(NumberOfSpatialSamples 2500 )
+(NewSamplesEveryIteration "true")
+(CheckNumberOfSamples "true")
+(MaximumNumberOfSamplingAttempts 10)
+
+//Order of B-Spline interpolation used in each resolution level:
+(BSplineInterpolationOrder 1)
+
+//Order of B-Spline interpolation used for applying the final deformation:
+(FinalBSplineInterpolationOrder 3)
+
+//Default pixel value for pixels that come from outside the picture:
+(DefaultPixelValue 0)
+
+(WriteResultImage "true")
+(ResultImagePixelType "short")
+(ResultImageFormat "mhd")
+
