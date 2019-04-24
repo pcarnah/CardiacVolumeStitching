@@ -3,28 +3,28 @@ import unittest
 import vtk, qt, ctk, slicer
 from slicer.ScriptedLoadableModule import *
 import logging
+import numpy as np
 
 #
 # CardiacVolumeStitching
 #
 
 class CardiacVolumeStitching(ScriptedLoadableModule):
-  """Uses ScriptedLoadableModule base class, available at:
-  https://github.com/Slicer/Slicer/blob/master/Base/Python/slicer/ScriptedLoadableModule.py
-  """
+    """Uses ScriptedLoadableModule base class, available at:
+    https://github.com/Slicer/Slicer/blob/master/Base/Python/slicer/ScriptedLoadableModule.py
+    """
 
-  def __init__(self, parent):
-    ScriptedLoadableModule.__init__(self, parent)
-    self.parent.title = "CardiacVolumeStitching" # TODO make this more human readable by adding spaces
-    self.parent.categories = ["Examples"]
-    self.parent.dependencies = []
-    self.parent.contributors = ["John Doe (AnyWare Corp.)"] # replace with "Firstname Lastname (Organization)"
-    self.parent.helpText = """
-This is an example of scripted loadable module bundled in an extension.
-It performs a simple thresholding on the input volume and optionally captures a screenshot.
+    def __init__(self, parent):
+        ScriptedLoadableModule.__init__(self, parent)
+        self.parent.title = "Cardiac Volume Stitching"
+        self.parent.categories = ["Cardiac"]
+        self.parent.dependencies = []
+        self.parent.contributors = ["Patrick Carnahan (Robarts Research Institute)"] # replace with "Firstname Lastname (Organization)"
+        self.parent.helpText = """
+This module facilitates the registration and stitching or transgastric and TEE volumes.
 """
-    self.parent.helpText += self.getDefaultModuleDocumentationLink()
-    self.parent.acknowledgementText = """
+        self.parent.helpText += self.getDefaultModuleDocumentationLink()
+        self.parent.acknowledgementText = """
 This file was originally developed by Jean-Christophe Fillion-Robin, Kitware Inc.
 and Steve Pieper, Isomics, Inc. and was partially funded by NIH grant 3P41RR013218-12S1.
 """ # replace with organization, grant and thanks.
@@ -34,256 +34,237 @@ and Steve Pieper, Isomics, Inc. and was partially funded by NIH grant 3P41RR0132
 #
 
 class CardiacVolumeStitchingWidget(ScriptedLoadableModuleWidget):
-  """Uses ScriptedLoadableModuleWidget base class, available at:
-  https://github.com/Slicer/Slicer/blob/master/Base/Python/slicer/ScriptedLoadableModule.py
-  """
+    """Uses ScriptedLoadableModuleWidget base class, available at:
+    https://github.com/Slicer/Slicer/blob/master/Base/Python/slicer/ScriptedLoadableModule.py
+    """
 
-  def setup(self):
-    ScriptedLoadableModuleWidget.setup(self)
+    def setup(self):
+        ScriptedLoadableModuleWidget.setup(self)
 
-    # Instantiate and connect widgets ...
+        # Instantiate and connect widgets ...
 
-    #
-    # Parameters Area
-    #
-    parametersCollapsibleButton = ctk.ctkCollapsibleButton()
-    parametersCollapsibleButton.text = "Parameters"
-    self.layout.addWidget(parametersCollapsibleButton)
+        #
+        # Parameters Area
+        #
+        parametersCollapsibleButton = ctk.ctkCollapsibleButton()
+        parametersCollapsibleButton.text = "Parameters"
+        self.layout.addWidget(parametersCollapsibleButton)
 
-    # Layout within the dummy collapsible button
-    parametersFormLayout = qt.QFormLayout(parametersCollapsibleButton)
+        # Layout within the dummy collapsible button
+        parametersFormLayout = qt.QFormLayout(parametersCollapsibleButton)
 
-    #
-    # input volume selector
-    #
-    self.inputSelector = slicer.qMRMLNodeComboBox()
-    self.inputSelector.nodeTypes = ["vtkMRMLScalarVolumeNode"]
-    self.inputSelector.selectNodeUponCreation = True
-    self.inputSelector.addEnabled = False
-    self.inputSelector.removeEnabled = False
-    self.inputSelector.noneEnabled = False
-    self.inputSelector.showHidden = False
-    self.inputSelector.showChildNodeTypes = False
-    self.inputSelector.setMRMLScene( slicer.mrmlScene )
-    self.inputSelector.setToolTip( "Pick the input to the algorithm." )
-    parametersFormLayout.addRow("Input Volume: ", self.inputSelector)
+        #
+        # input volume folder selector
+        #
+        self.inputDirSelector = ctk.ctkPathLineEdit()
+        self.inputDirSelector.filters = ctk.ctkPathLineEdit.Dirs
+        self.inputDirSelector.settingKey = 'Philips4dUsDicomPatcherInputDir'
 
-    #
-    # output volume selector
-    #
-    self.outputSelector = slicer.qMRMLNodeComboBox()
-    self.outputSelector.nodeTypes = ["vtkMRMLScalarVolumeNode"]
-    self.outputSelector.selectNodeUponCreation = True
-    self.outputSelector.addEnabled = True
-    self.outputSelector.removeEnabled = True
-    self.outputSelector.noneEnabled = True
-    self.outputSelector.showHidden = False
-    self.outputSelector.showChildNodeTypes = False
-    self.outputSelector.setMRMLScene( slicer.mrmlScene )
-    self.outputSelector.setToolTip( "Pick the output to the algorithm." )
-    parametersFormLayout.addRow("Output Volume: ", self.outputSelector)
+        parametersFormLayout.addRow("Input Volume directory:", self.inputDirSelector)
 
-    #
-    # threshold value
-    #
-    self.imageThresholdSliderWidget = ctk.ctkSliderWidget()
-    self.imageThresholdSliderWidget.singleStep = 0.1
-    self.imageThresholdSliderWidget.minimum = -100
-    self.imageThresholdSliderWidget.maximum = 100
-    self.imageThresholdSliderWidget.value = 0.5
-    self.imageThresholdSliderWidget.setToolTip("Set threshold value for computing the output image. Voxels that have intensities lower than this value will set to zero.")
-    parametersFormLayout.addRow("Image threshold", self.imageThresholdSliderWidget)
 
-    #
-    # check box to trigger taking screen shots for later use in tutorials
-    #
-    self.enableScreenshotsFlagCheckBox = qt.QCheckBox()
-    self.enableScreenshotsFlagCheckBox.checked = 0
-    self.enableScreenshotsFlagCheckBox.setToolTip("If checked, take screen shots for tutorials. Use Save Data to write them to disk.")
-    parametersFormLayout.addRow("Enable Screenshots", self.enableScreenshotsFlagCheckBox)
+        #
+        # Apply Button
+        #
+        self.applyButton = qt.QPushButton("Apply")
+        self.applyButton.toolTip = "Run the algorithm."
+        self.applyButton.enabled = False
+        parametersFormLayout.addRow(self.applyButton)
 
-    #
-    # Apply Button
-    #
-    self.applyButton = qt.QPushButton("Apply")
-    self.applyButton.toolTip = "Run the algorithm."
-    self.applyButton.enabled = False
-    parametersFormLayout.addRow(self.applyButton)
+        # connections
+        self.applyButton.connect('clicked(bool)', self.onApplyButton)
 
-    # connections
-    self.applyButton.connect('clicked(bool)', self.onApplyButton)
-    self.inputSelector.connect("currentNodeChanged(vtkMRMLNode*)", self.onSelect)
-    self.outputSelector.connect("currentNodeChanged(vtkMRMLNode*)", self.onSelect)
+        # Add vertical spacer
+        self.layout.addStretch(1)
 
-    # Add vertical spacer
-    self.layout.addStretch(1)
 
-    # Refresh Apply button state
-    self.onSelect()
+    def cleanup(self):
+        pass
 
-  def cleanup(self):
-    pass
 
-  def onSelect(self):
-    self.applyButton.enabled = self.inputSelector.currentNode() and self.outputSelector.currentNode()
 
-  def onApplyButton(self):
-    logic = CardiacVolumeStitchingLogic()
-    enableScreenshotsFlag = self.enableScreenshotsFlagCheckBox.checked
-    imageThreshold = self.imageThresholdSliderWidget.value
-    logic.run(self.inputSelector.currentNode(), self.outputSelector.currentNode(), imageThreshold, enableScreenshotsFlag)
+    def onApplyButton(self):
+        logic = CardiacVolumeStitchingLogic()
+        logic.run()
+
 
 #
 # CardiacVolumeStitchingLogic
 #
 
 class CardiacVolumeStitchingLogic(ScriptedLoadableModuleLogic):
-  """This class should implement all the actual
-  computation done by your module.  The interface
-  should be such that other python code can import
-  this class and make use of the functionality without
-  requiring an instance of the Widget.
-  Uses ScriptedLoadableModuleLogic base class, available at:
-  https://github.com/Slicer/Slicer/blob/master/Base/Python/slicer/ScriptedLoadableModule.py
-  """
-
-  def hasImageData(self,volumeNode):
-    """This is an example logic method that
-    returns true if the passed in volume
-    node has valid image data
-    """
-    if not volumeNode:
-      logging.debug('hasImageData failed: no volume node')
-      return False
-    if volumeNode.GetImageData() is None:
-      logging.debug('hasImageData failed: no image data in volume node')
-      return False
-    return True
-
-  def isValidInputOutputData(self, inputVolumeNode, outputVolumeNode):
-    """Validates if the output is not the same as input
-    """
-    if not inputVolumeNode:
-      logging.debug('isValidInputOutputData failed: no input volume node defined')
-      return False
-    if not outputVolumeNode:
-      logging.debug('isValidInputOutputData failed: no output volume node defined')
-      return False
-    if inputVolumeNode.GetID()==outputVolumeNode.GetID():
-      logging.debug('isValidInputOutputData failed: input and output volume is the same. Create a new volume for output to avoid this error.')
-      return False
-    return True
-
-  def takeScreenshot(self,name,description,type=-1):
-    # show the message even if not taking a screen shot
-    slicer.util.delayDisplay('Take screenshot: '+description+'.\nResult is available in the Annotations module.', 3000)
-
-    lm = slicer.app.layoutManager()
-    # switch on the type to get the requested window
-    widget = 0
-    if type == slicer.qMRMLScreenShotDialog.FullLayout:
-      # full layout
-      widget = lm.viewport()
-    elif type == slicer.qMRMLScreenShotDialog.ThreeD:
-      # just the 3D window
-      widget = lm.threeDWidget(0).threeDView()
-    elif type == slicer.qMRMLScreenShotDialog.Red:
-      # red slice window
-      widget = lm.sliceWidget("Red")
-    elif type == slicer.qMRMLScreenShotDialog.Yellow:
-      # yellow slice window
-      widget = lm.sliceWidget("Yellow")
-    elif type == slicer.qMRMLScreenShotDialog.Green:
-      # green slice window
-      widget = lm.sliceWidget("Green")
-    else:
-      # default to using the full window
-      widget = slicer.util.mainWindow()
-      # reset the type so that the node is set correctly
-      type = slicer.qMRMLScreenShotDialog.FullLayout
-
-    # grab and convert to vtk image data
-    qimage = ctk.ctkWidgetsUtils.grabWidget(widget)
-    imageData = vtk.vtkImageData()
-    slicer.qMRMLUtils().qImageToVtkImageData(qimage,imageData)
-
-    annotationLogic = slicer.modules.annotations.logic()
-    annotationLogic.CreateSnapShot(name, description, type, 1, imageData)
-
-  def run(self, inputVolume, outputVolume, imageThreshold, enableScreenshots=0):
-    """
-    Run the actual algorithm
+    """This class should implement all the actual
+    computation done by your module.  The interface
+    should be such that other python code can import
+    this class and make use of the functionality without
+    requiring an instance of the Widget.
+    Uses ScriptedLoadableModuleLogic base class, available at:
+    https://github.com/Slicer/Slicer/blob/master/Base/Python/slicer/ScriptedLoadableModule.py
     """
 
-    if not self.isValidInputOutputData(inputVolume, outputVolume):
-      slicer.util.errorDisplay('Input volume is the same as output volume. Choose a different output volume.')
-      return False
+    def run(self):
+        # still need to include running elastix from code
 
-    logging.info('Processing started')
+        # Replace with list from ui
+        nodes = slicer.util.getNodesByClass('vtkMRMLScalarVolumeNode')
 
-    # Compute the thresholded output volume using the Threshold Scalar Volume CLI module
-    cliParams = {'InputVolume': inputVolume.GetID(), 'OutputVolume': outputVolume.GetID(), 'ThresholdValue' : imageThreshold, 'ThresholdType' : 'Above'}
-    cliNode = slicer.cli.run(slicer.modules.thresholdscalarvolume, None, cliParams, wait_for_completion=True)
+        for n in nodes:
+            if not "Transgastric" in n.GetName():
+                nodes.remove(n)
 
-    # Capture screenshot
-    if enableScreenshots:
-      self.takeScreenshot('CardiacVolumeStitchingTest-Start','MyScreenshot',-1)
+        # Will be used, get bounds of final volume
+        bounds = np.zeros((4, 6))
+        for i in xrange(4):
+            nodes[i].GetSliceBounds(bounds[i, :], None)
 
-    logging.info('Processing completed')
+        min = bounds.min(0)
+        max = bounds.max(0)
 
-    return True
+        volumeBounds_ROI = np.array([min[0], max[1], min[2], max[3], min[4], max[5]])
+
+        outputSpacing = 0.4
+
+        roiDim = np.zeros(3)
+
+        for i in range(3):
+            roiDim[i] = (volumeBounds_ROI[i * 2 + 1] - volumeBounds_ROI[i * 2]) / outputSpacing;
+
+        roiDim = np.ceil(roiDim).astype('uint16')
+
+        final = np.zeros([4, roiDim[2] + 1, roiDim[1] + 1, roiDim[0] + 1], 'uint8')
+
+        # for each volume, resample into output space
+        # will need to do for each frame in sequence as well
+        for i in xrange(4):
+            n = nodes[i]
+
+            out = slicer.util.getFirstNodeByName(n.GetName() + '-Resampled')
+            if not out:
+                out = slicer.mrmlScene.AddNewNodeByClass('vtkMRMLScalarVolumeNode', n.GetName() + '-Resampled')
+
+            out.SetOrigin(volumeBounds_ROI[0], volumeBounds_ROI[2], volumeBounds_ROI[4])
+            out.SetSpacing([outputSpacing] * 3)
+
+            inputIJK2RASMatrix = vtk.vtkMatrix4x4()
+            n.GetIJKToRASMatrix(inputIJK2RASMatrix)
+            referenceRAS2IJKMatrix = vtk.vtkMatrix4x4()
+            out.GetRASToIJKMatrix(referenceRAS2IJKMatrix)
+            inputRAS2RASMatrix = vtk.vtkGeneralTransform()
+            if n.GetTransformNodeID():
+                slicer.mrmlScene.GetNodeByID(n.GetTransformNodeID()).GetTransformToWorld(inputRAS2RASMatrix)
+
+            resampleTransform = vtk.vtkGeneralTransform()
+            resampleTransform.Identity()
+            resampleTransform.PostMultiply()
+            resampleTransform.Concatenate(inputIJK2RASMatrix)
+            resampleTransform.Concatenate(inputRAS2RASMatrix)
+            resampleTransform.Concatenate(referenceRAS2IJKMatrix)
+            resampleTransform.Inverse()
+
+            resampler = vtk.vtkImageReslice()
+            resampler.SetInputConnection(n.GetImageDataConnection())
+            resampler.SetOutputOrigin(0, 0, 0)
+            resampler.SetOutputSpacing(1, 1, 1)
+            resampler.SetOutputExtent(0, roiDim[0], 0, roiDim[1], 0, roiDim[2])
+            resampler.SetResliceTransform(resampleTransform)
+            resampler.SetInterpolationModeToCubic()
+            resampler.Update()
+
+            out.SetAndObserveImageData(resampler.GetOutput())
+
+        # replace this with running max and only one output volume for space efficiency
+        for i in xrange(4):
+            n = nodes[i]
+
+            out = slicer.util.getFirstNodeByName(n.GetName() + '-Resampled')
+            final[i, :] = slicer.util.arrayFromVolume(out)
+
+        finalMax = final.max(0)
+        out = slicer.util.getFirstNodeByName('Stitched-Output')
+        if not out:
+            out = slicer.mrmlScene.AddNewNodeByClass('vtkMRMLScalarVolumeNode', 'Stitched-Output')
+
+        out.SetOrigin(volumeBounds_ROI[0], volumeBounds_ROI[2], volumeBounds_ROI[4])
+        out.SetSpacing([outputSpacing] * 3)
+        slicer.util.updateVolumeFromArray(out, finalMax)
+
+
+    def getElastixRigidFromDisplacementGrid(self, gridTransformNode, outputNode):
+
+        gridTransform = gridTransformNode.GetTransformFromParent()
+
+        # Get center and dimensions of displacement grid
+        center = np.zeros(3)
+        bounds = np.zeros(6)
+
+        gridTransform.GetDisplacementGrid().GetCenter(center)
+        gridTransform.GetDisplacementGrid().GetBounds(bounds)
+
+        dims = np.zeros(3)
+        for i in xrange(3):
+            dims[i] = (bounds[i * 2 + 1] - bounds[i * 2]);
+
+        # Create sample points in middle 75% of grid
+        pointSrc = vtk.vtkPointSource()
+        pointSrc.SetCenter(center)
+        pointSrc.SetRadius(np.min((dims * 0.75) / 2))
+        pointSrc.SetNumberOfPoints(200)
+        pointSrc.Update()
+
+
+        # Transform a copy of points using displacement grid
+        toPoints = pointSrc.GetOutput().GetPoints()
+        fromPointsGrid = vtk.vtkPoints()
+
+        gridTransform.TransformPoints(toPoints, fromPointsGrid)
+
+        # Find corresponding rigid transform between point sets
+        landmark = vtk.vtkLandmarkTransform()
+        landmark.SetModeToRigidBody()
+        landmark.SetSourceLandmarks(fromPointsGrid)
+        landmark.SetTargetLandmarks(toPoints)
+        landmark.Update()
+
+        error = 0
+        fromPointsRigid = vtk.vtkPoints()
+        landmark.TransformPoints(fromPointsGrid, fromPointsRigid)
+        for i in xrange(toPoints.GetNumberOfPoints()):
+            toPoint = np.zeros(3)
+            fromPoint = np.zeros(3)
+            toPoints.GetPoint(i, toPoint)
+            fromPointsRigid.GetPoint(i, fromPoint)
+
+            error += np.linalg.norm(toPoint - fromPoint) ** 2
+
+        error = np.sqrt(error / toPoints.GetNumberOfPoints())
+
+        linTransform = vtk.vtkTransform()
+        linTransform.Identity()
+        if error > 0.5:
+            logging.debug("Cannot compute rigid transform from given displacement field")
+        else:
+            linTransform.SetMatrix(landmark.GetMatrix())
+
+        outputNode.SetAndObserveTransformToParent(linTransform)
+
+
 
 
 class CardiacVolumeStitchingTest(ScriptedLoadableModuleTest):
-  """
-  This is the test case for your scripted module.
-  Uses ScriptedLoadableModuleTest base class, available at:
-  https://github.com/Slicer/Slicer/blob/master/Base/Python/slicer/ScriptedLoadableModule.py
-  """
-
-  def setUp(self):
-    """ Do whatever is needed to reset the state - typically a scene clear will be enough.
     """
-    slicer.mrmlScene.Clear(0)
-
-  def runTest(self):
-    """Run as few or as many tests as needed here.
-    """
-    self.setUp()
-    self.test_CardiacVolumeStitching1()
-
-  def test_CardiacVolumeStitching1(self):
-    """ Ideally you should have several levels of tests.  At the lowest level
-    tests should exercise the functionality of the logic with different inputs
-    (both valid and invalid).  At higher levels your tests should emulate the
-    way the user would interact with your code and confirm that it still works
-    the way you intended.
-    One of the most important features of the tests is that it should alert other
-    developers when their changes will have an impact on the behavior of your
-    module.  For example, if a developer removes a feature that you depend on,
-    your test should break so they know that the feature is needed.
+    This is the test case for your scripted module.
+    Uses ScriptedLoadableModuleTest base class, available at:
+    https://github.com/Slicer/Slicer/blob/master/Base/Python/slicer/ScriptedLoadableModule.py
     """
 
-    self.delayDisplay("Starting the test")
-    #
-    # first, get some data
-    #
-    import urllib
-    downloads = (
-        ('http://slicer.kitware.com/midas3/download?items=5767', 'FA.nrrd', slicer.util.loadVolume),
-        )
+    def setUp(self):
+        """ Do whatever is needed to reset the state - typically a scene clear will be enough.
+        """
+        slicer.mrmlScene.Clear(0)
 
-    for url,name,loader in downloads:
-      filePath = slicer.app.temporaryPath + '/' + name
-      if not os.path.exists(filePath) or os.stat(filePath).st_size == 0:
-        logging.info('Requesting download %s from %s...\n' % (name, url))
-        urllib.urlretrieve(url, filePath)
-      if loader:
-        logging.info('Loading %s...' % (name,))
-        loader(filePath)
-    self.delayDisplay('Finished with download and loading')
+    def runTest(self):
+        """Run as few or as many tests as needed here.
+        """
+        self.setUp()
 
-    volumeNode = slicer.util.getNode(pattern="FA")
-    logic = CardiacVolumeStitchingLogic()
-    self.assertIsNotNone( logic.hasImageData(volumeNode) )
-    self.delayDisplay('Test passed!')
+
