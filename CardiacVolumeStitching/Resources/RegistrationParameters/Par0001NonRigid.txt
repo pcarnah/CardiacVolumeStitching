@@ -15,15 +15,16 @@
 (Optimizer "AdaptiveStochasticGradientDescent")
 (ResampleInterpolator "FinalBSplineInterpolator")
 (Resampler "DefaultResampler")
-(Transform "EulerTransform")
+(Transform "BSplineTransform")
 
 (ErodeMask "true" )
 
-(NumberOfResolutions 4)
+(NumberOfResolutions 2)
 
 (HowToCombineTransforms "Compose")
-(AutomaticScalesEstimation "true")
 (AutomaticTransformInitialization "true")
+(AutomaticTransformInitializationMethod "GeometricalCenter")
+(AutomaticScalesEstimation "true")
 
 
 (WriteTransformParametersEachIteration "false")
@@ -31,7 +32,7 @@
 (ShowExactMetricValue "false")
 
 //Maximum number of iterations in each resolution level:
-(MaximumNumberOfIterations 1000 ) 
+(MaximumNumberOfIterations 100 ) 
 
 //Number of grey level bins in each resolution level:
 (NumberOfHistogramBins 32 )

@@ -56,11 +56,26 @@ class CardiacVolumeStitchingWidget(ScriptedLoadableModuleWidget):
         #
         # input volume folder selector
         #
-        self.inputDirSelector = ctk.ctkPathLineEdit()
-        self.inputDirSelector.filters = ctk.ctkPathLineEdit.Dirs
-        self.inputDirSelector.settingKey = 'Philips4dUsDicomPatcherInputDir'
+        # self.inputDirSelector = ctk.ctkPathLineEdit()
+        # self.inputDirSelector.filters = ctk.ctkPathLineEdit.Dirs
+        # self.inputDirSelector.settingKey = 'Philips4dUsDicomPatcherInputDir'
+        #
+        # parametersFormLayout.addRow("Input Volume directory:", self.inputDirSelector)
 
-        parametersFormLayout.addRow("Input Volume directory:", self.inputDirSelector)
+        #
+        # output volume selector
+        #
+        self.outputSelector = slicer.qMRMLNodeComboBox()
+        self.outputSelector.nodeTypes = ["vtkMRMLScalarVolumeNode"]
+        self.outputSelector.selectNodeUponCreation = True
+        self.outputSelector.addEnabled = True
+        self.outputSelector.removeEnabled = True
+        self.outputSelector.noneEnabled = False
+        self.outputSelector.showHidden = False
+        self.outputSelector.showChildNodeTypes = False
+        self.outputSelector.setMRMLScene(slicer.mrmlScene)
+        self.outputSelector.setToolTip("Pick the output of the algorithm.")
+        parametersFormLayout.addRow("Output Volume", self.outputSelector)
 
 
         #
@@ -68,7 +83,7 @@ class CardiacVolumeStitchingWidget(ScriptedLoadableModuleWidget):
         #
         self.applyButton = qt.QPushButton("Apply")
         self.applyButton.toolTip = "Run the algorithm."
-        self.applyButton.enabled = False
+        self.applyButton.enabled = True
         parametersFormLayout.addRow(self.applyButton)
 
         # connections
@@ -102,20 +117,29 @@ class CardiacVolumeStitchingLogic(ScriptedLoadableModuleLogic):
     https://github.com/Slicer/Slicer/blob/master/Base/Python/slicer/ScriptedLoadableModule.py
     """
 
+    def __init__(self):
+        self.parameterSets = [['Par0001Rigid.txt', 'Par0001NonRigid.txt'], ['Par0002Rotation.txt', 'Par0001Rigid.txt']]
+
     def run(self):
-        # still need to include running elastix from code
-
         # Replace with list from ui
-        nodes = slicer.util.getNodesByClass('vtkMRMLScalarVolumeNode')
+        nodes = [None]*4
+        nodes[0] = slicer.util.getFirstNodeByClassByName('vtkMRMLScalarVolumeNode', '011 Transgastric 1 Cartesian')
+        nodes[1] = slicer.util.getFirstNodeByClassByName('vtkMRMLScalarVolumeNode', '011 Transgastric 2 Cartesian')
+        nodes[2] = slicer.util.getFirstNodeByClassByName('vtkMRMLScalarVolumeNode', '011 Transgastric 3 Cartesian')
+        nodes[3] = slicer.util.getFirstNodeByClassByName('vtkMRMLScalarVolumeNode', '011 Transgastric 4 Cartesian')
 
-        for n in nodes:
-            if not "Transgastric" in n.GetName():
-                nodes.remove(n)
+        masks = [None]*4
+        for i,n in enumerate(nodes):
+            masks[i] = self.generateMask(n)
 
-        # Will be used, get bounds of final volume
-        bounds = np.zeros((4, 6))
-        for i in xrange(4):
-            nodes[i].GetSliceBounds(bounds[i, :], None)
+        self.registerVolumes(nodes, masks)
+        self.mergeVolumes(nodes)
+
+    def mergeVolumes(self, volumeList):
+        # Get bounds of final volume
+        bounds = np.zeros((len(volumeList), 6))
+        for i in range(len(volumeList)):
+            volumeList[i].GetSliceBounds(bounds[i, :], None)
 
         min = bounds.min(0)
         max = bounds.max(0)
@@ -131,36 +155,45 @@ class CardiacVolumeStitchingLogic(ScriptedLoadableModuleLogic):
 
         roiDim = np.ceil(roiDim).astype('uint16')
 
-        final = np.zeros([4, roiDim[2] + 1, roiDim[1] + 1, roiDim[0] + 1], 'uint8')
+        out = slicer.util.getFirstNodeByName('Stitched-Output')
+        if not out or not out.GetName() == 'Stitched-Output':
+            out = slicer.mrmlScene.AddNewNodeByClass('vtkMRMLScalarVolumeNode', 'Stitched-Output')
+
+        out.SetOrigin(volumeBounds_ROI[0], volumeBounds_ROI[2], volumeBounds_ROI[4])
+        out.SetSpacing([outputSpacing] * 3)
+
+        # Create accumulator image initialized to 0 to populate with final max values
+        maxImage = vtk.vtkImageData()
+        maxImage.SetOrigin(0,0,0)
+        maxImage.SetSpacing(1, 1, 1)
+        maxImage.SetExtent(0, roiDim[0], 0, roiDim[1], 0, roiDim[2])
+        maxImage.AllocateScalars(vtk.VTK_UNSIGNED_CHAR,0)
 
         # for each volume, resample into output space
         # will need to do for each frame in sequence as well
-        for i in xrange(4):
-            n = nodes[i]
+        for i in range(len(volumeList)):
+            n = volumeList[i]
 
-            out = slicer.util.getFirstNodeByName(n.GetName() + '-Resampled')
-            if not out:
-                out = slicer.mrmlScene.AddNewNodeByClass('vtkMRMLScalarVolumeNode', n.GetName() + '-Resampled')
-
-            out.SetOrigin(volumeBounds_ROI[0], volumeBounds_ROI[2], volumeBounds_ROI[4])
-            out.SetSpacing([outputSpacing] * 3)
-
+            # Get transforms for input and output volumes
             inputIJK2RASMatrix = vtk.vtkMatrix4x4()
             n.GetIJKToRASMatrix(inputIJK2RASMatrix)
             referenceRAS2IJKMatrix = vtk.vtkMatrix4x4()
             out.GetRASToIJKMatrix(referenceRAS2IJKMatrix)
-            inputRAS2RASMatrix = vtk.vtkGeneralTransform()
+            inputRAS2RASTransform = vtk.vtkGeneralTransform()
             if n.GetTransformNodeID():
-                slicer.mrmlScene.GetNodeByID(n.GetTransformNodeID()).GetTransformToWorld(inputRAS2RASMatrix)
+                slicer.mrmlScene.GetNodeByID(n.GetTransformNodeID()).GetTransformToWorld(inputRAS2RASTransform)
 
+            # Create resample transform from reference volume to input
             resampleTransform = vtk.vtkGeneralTransform()
             resampleTransform.Identity()
             resampleTransform.PostMultiply()
             resampleTransform.Concatenate(inputIJK2RASMatrix)
-            resampleTransform.Concatenate(inputRAS2RASMatrix)
+            resampleTransform.Concatenate(inputRAS2RASTransform)
             resampleTransform.Concatenate(referenceRAS2IJKMatrix)
             resampleTransform.Inverse()
 
+
+            # Resample the image to the output space using transform
             resampler = vtk.vtkImageReslice()
             resampler.SetInputConnection(n.GetImageDataConnection())
             resampler.SetOutputOrigin(0, 0, 0)
@@ -168,25 +201,63 @@ class CardiacVolumeStitchingLogic(ScriptedLoadableModuleLogic):
             resampler.SetOutputExtent(0, roiDim[0], 0, roiDim[1], 0, roiDim[2])
             resampler.SetResliceTransform(resampleTransform)
             resampler.SetInterpolationModeToCubic()
+            resampler.SetOutputScalarType(vtk.VTK_UNSIGNED_CHAR)
             resampler.Update()
 
-            out.SetAndObserveImageData(resampler.GetOutput())
+            # Take maximum value
+            mathFilter = vtk.vtkImageMathematics()
+            mathFilter.SetOperationToMax()
+            mathFilter.SetInput1Data(maxImage)
+            mathFilter.SetInput2Data(resampler.GetOutput())
+            mathFilter.Update()
 
-        # replace this with running max and only one output volume for space efficiency
-        for i in xrange(4):
-            n = nodes[i]
+            maxImage.DeepCopy(mathFilter.GetOutput())
 
-            out = slicer.util.getFirstNodeByName(n.GetName() + '-Resampled')
-            final[i, :] = slicer.util.arrayFromVolume(out)
+        # Set output volume
+        out.SetAndObserveImageData(maxImage)
 
-        finalMax = final.max(0)
-        out = slicer.util.getFirstNodeByName('Stitched-Output')
-        if not out:
-            out = slicer.mrmlScene.AddNewNodeByClass('vtkMRMLScalarVolumeNode', 'Stitched-Output')
+    def registerVolumes(self, volumeList, maskList = None, parSet = None):
+        import Elastix
+        elastix = Elastix.ElastixLogic()
 
-        out.SetOrigin(volumeBounds_ROI[0], volumeBounds_ROI[2], volumeBounds_ROI[4])
-        out.SetSpacing([outputSpacing] * 3)
-        slicer.util.updateVolumeFromArray(out, finalMax)
+        moduleDir = os.path.dirname(os.path.abspath(__file__))
+        registrationResourcesDir = os.path.abspath(os.path.join(moduleDir, 'Resources', 'RegistrationParameters'))
+
+        elastix.registrationParameterFilesDir = registrationResourcesDir
+
+        for i in range(len(volumeList)-1):
+            trName = 'Volume{0}To{1}'.format(i+2,i+1)
+            trNode = slicer.util.getFirstNodeByName(trName)
+            if not trNode or not trNode.GetName() == trName:
+                trNode = slicer.mrmlScene.AddNewNodeByClass('vtkMRMLGridTransformNode', trName)
+
+            if maskList and len(maskList) == 1:
+                fixedMask = maskList[0]
+                movingMask = None
+            elif maskList and len(maskList) > i+1:
+                fixedMask = maskList[i]
+                movingMask = maskList[i+1]
+            else:
+                fixedMask = None
+                movingMask = None
+
+            if parSet and len(parSet) == 1:
+                parIdx = parSet[0]
+            elif parSet and len(parSet) > i:
+                parIdx = parSet[i]
+            else:
+                parIdx = 0
+
+
+            elastix.registerVolumes(volumeList[i], volumeList[i+1],
+                                    self.parameterSets[parIdx],
+                                    outputTransformNode = trNode,
+                                    fixedVolumeMaskNode = fixedMask,
+                                    movingVolumeMaskNode = movingMask)
+
+            volumeList[i+1].SetAndObserveTransformNodeID(trNode.GetID())
+
+            trNode.SetAndObserveTransformNodeID(volumeList[i].GetTransformNodeID())
 
 
     def getElastixRigidFromDisplacementGrid(self, gridTransformNode, outputNode):
@@ -201,13 +272,13 @@ class CardiacVolumeStitchingLogic(ScriptedLoadableModuleLogic):
         gridTransform.GetDisplacementGrid().GetBounds(bounds)
 
         dims = np.zeros(3)
-        for i in xrange(3):
+        for i in range(3):
             dims[i] = (bounds[i * 2 + 1] - bounds[i * 2]);
 
-        # Create sample points in middle 75% of grid
+        # Create sample points in grid
         pointSrc = vtk.vtkPointSource()
         pointSrc.SetCenter(center)
-        pointSrc.SetRadius(np.min((dims * 0.75) / 2))
+        pointSrc.SetRadius(np.min((dims) / 2))
         pointSrc.SetNumberOfPoints(200)
         pointSrc.Update()
 
@@ -228,7 +299,7 @@ class CardiacVolumeStitchingLogic(ScriptedLoadableModuleLogic):
         error = 0
         fromPointsRigid = vtk.vtkPoints()
         landmark.TransformPoints(fromPointsGrid, fromPointsRigid)
-        for i in xrange(toPoints.GetNumberOfPoints()):
+        for i in range(toPoints.GetNumberOfPoints()):
             toPoint = np.zeros(3)
             fromPoint = np.zeros(3)
             toPoints.GetPoint(i, toPoint)
@@ -247,7 +318,52 @@ class CardiacVolumeStitchingLogic(ScriptedLoadableModuleLogic):
 
         outputNode.SetAndObserveTransformToParent(linTransform)
 
+    def generateMask(self, refVolumeNode):
 
+        segmentationNode = slicer.mrmlScene.AddNewNodeByClass('vtkMRMLSegmentationNode', 'VolumeMask')
+        segmentationNode.GetSegmentation().AddEmptySegment('VolumeMask')
+
+        # Create segment editor to get access to effects
+        segmentEditorWidget = slicer.qMRMLSegmentEditorWidget()
+        segmentEditorWidget.setMRMLScene(slicer.mrmlScene)
+        segmentEditorNode = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLSegmentEditorNode")
+        segmentEditorNode.SetOverwriteMode(segmentEditorNode.OverwriteNone)
+        segmentEditorWidget.setMRMLSegmentEditorNode(segmentEditorNode)
+        segmentEditorWidget.setSegmentationNode(segmentationNode)
+        segmentEditorWidget.setMasterVolumeNode(refVolumeNode)
+        segmentEditorWidget.setCurrentSegmentID('VolumeMask')
+
+        # Threshold to get a mask of the ultrasound cone
+        segmentEditorWidget.setActiveEffectByName("Threshold")
+        effect = segmentEditorWidget.activeEffect()
+        masterImageData = effect.masterVolumeImageData()
+        lo, hi = masterImageData.GetScalarRange()
+        effect.setParameter("MinimumThreshold", 1)
+        effect.setParameter("MaximumThreshold", hi)
+        effect.self().onApply()
+
+        # Margin Shrink to exclude borders
+        segmentEditorWidget.setActiveEffectByName("Margin")
+        effect = segmentEditorWidget.activeEffect()
+        effect.setParameter("MarginSizeMm", -6)
+        effect.self().onApply()
+
+        # Create label map node to store mask
+        labelNode = slicer.util.getFirstNodeByClassByName('vtkMRMLLabelMapVolumeNode', refVolumeNode.GetName()+'-label')
+        if not labelNode:
+            labelNode = slicer.mrmlScene.AddNewNodeByClass('vtkMRMLLabelMapVolumeNode', refVolumeNode.GetName()+'-label')
+        labelNode.SetAndObserveTransformNodeID(refVolumeNode.GetTransformNodeID())
+
+        segmentationIds = vtk.vtkStringArray()
+        segmentationIds.InsertNextValue('VolumeMask')
+        slicer.modules.segmentations.logic().ExportSegmentsToLabelmapNode(segmentationNode, segmentationIds,
+                                                                          labelNode, refVolumeNode)
+        # Clean up
+        segmentEditorWidget = None
+        slicer.mrmlScene.RemoveNode(segmentEditorNode)
+        slicer.mrmlScene.RemoveNode(segmentationNode)
+
+        return  labelNode
 
 
 class CardiacVolumeStitchingTest(ScriptedLoadableModuleTest):
