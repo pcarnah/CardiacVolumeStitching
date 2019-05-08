@@ -43,6 +43,7 @@
 (NewSamplesEveryIteration "true")
 (CheckNumberOfSamples "true")
 (MaximumNumberOfSamplingAttempts 10)
+(RequiredRatioOfValidSamples 0.10) 
 
 //Order of B-Spline interpolation used in each resolution level:
 (BSplineInterpolationOrder 1)

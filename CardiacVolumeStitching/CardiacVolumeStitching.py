@@ -122,18 +122,41 @@ class CardiacVolumeStitchingLogic(ScriptedLoadableModuleLogic):
 
     def run(self):
         # Replace with list from ui
-        nodes = [None]*4
+        nodes = [None]*5
         nodes[0] = slicer.util.getFirstNodeByClassByName('vtkMRMLScalarVolumeNode', '011 Transgastric 1 Cartesian')
         nodes[1] = slicer.util.getFirstNodeByClassByName('vtkMRMLScalarVolumeNode', '011 Transgastric 2 Cartesian')
         nodes[2] = slicer.util.getFirstNodeByClassByName('vtkMRMLScalarVolumeNode', '011 Transgastric 3 Cartesian')
         nodes[3] = slicer.util.getFirstNodeByClassByName('vtkMRMLScalarVolumeNode', '011 Transgastric 4 Cartesian')
 
-        masks = [None]*4
+        tr = vtk.vtkTransform()
+        # Rotates the en face view to the correct orientation with respect to transgastric views
+        tr.RotateWXYZ(98.4210581181494, 0.35740674433659325, -0.8628562094610169, -0.35740674433659314)
+        trnode = slicer.util.getFirstNodeByClassByName('vtkMRMLTransformNode', 'TEEProbeToRAS')
+        if not trnode or not trnode.GetName() == 'TEEProbeToRAS':
+            trnode = slicer.mrmlScene.AddNewNodeByClass('vtkMRMLTransformNode', 'TEEProbeToRAS')
+
+
+        trnode.SetAndObserveTransformToParent(tr)
+
+        ef = slicer.util.getFirstNodeByClassByName('vtkMRMLScalarVolumeNode', '011 Cartesian DICOM')
+        ef.SetAndObserveTransformNodeID(trnode.GetID())
+
+        temp_node = slicer.mrmlScene.AddNewNodeByClass('vtkMRMLScalarVolumeNode')
+        temp_node.Copy(ef)
+        temp_node.SetName('temp_volume')
+        temp_node.SetAndObserveTransformNodeID(trnode.GetID())
+        temp_node.HardenTransform()
+        nodes[4] = temp_node
+
+        masks = [None]*5
         for i,n in enumerate(nodes):
             masks[i] = self.generateMask(n)
 
         self.registerVolumes(nodes, masks)
         self.mergeVolumes(nodes)
+
+        slicer.mrmlScene.RemoveNode(temp_node)
+        slicer.mrmlScene.RemoveNode(trnode)
 
     def mergeVolumes(self, volumeList):
         # Get bounds of final volume
@@ -219,6 +242,8 @@ class CardiacVolumeStitchingLogic(ScriptedLoadableModuleLogic):
     def registerVolumes(self, volumeList, maskList = None, parSet = None):
         import Elastix
         elastix = Elastix.ElastixLogic()
+        # elastix.logStandardOutput = True
+        # elastix.deleteTemporaryFiles = False
 
         moduleDir = os.path.dirname(os.path.abspath(__file__))
         registrationResourcesDir = os.path.abspath(os.path.join(moduleDir, 'Resources', 'RegistrationParameters'))
@@ -231,7 +256,10 @@ class CardiacVolumeStitchingLogic(ScriptedLoadableModuleLogic):
             if not trNode or not trNode.GetName() == trName:
                 trNode = slicer.mrmlScene.AddNewNodeByClass('vtkMRMLGridTransformNode', trName)
 
-            if maskList and len(maskList) == 1:
+            if maskList and not isinstance(maskList, (list, tuple, np.ndarray)):
+                fixedMask = maskList
+                movingMask = None
+            elif maskList and len(maskList) == 1:
                 fixedMask = maskList[0]
                 movingMask = None
             elif maskList and len(maskList) > i+1:
