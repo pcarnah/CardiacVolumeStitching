@@ -39,7 +39,7 @@
 //Number of spatial samples used to compute the mutual information in each resolution level:
 (ImageSampler "RandomSparseMask")
 (UseRandomSampleRegion "false")
-(NumberOfSpatialSamples 2500 )
+(NumberOfSpatialSamples 4000 )
 (NewSamplesEveryIteration "true")
 (CheckNumberOfSamples "true")
 (MaximumNumberOfSamplingAttempts 10)
