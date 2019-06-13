@@ -4,6 +4,8 @@ import vtk, qt, ctk, slicer
 from slicer.ScriptedLoadableModule import *
 import logging
 import numpy as np
+from six.moves import range
+from timeit import default_timer as timer
 
 
 #
@@ -155,6 +157,7 @@ class CardiacVolumeStitchingWidget(ScriptedLoadableModuleWidget):
         self.applyButton.toolTip = "Run the algorithm."
         self.applyButton.enabled = False
         parametersFormLayout.addRow(self.applyButton)
+
 
         # connections
         self.addVolumeButton.connect('clicked(bool)', self.onAddVolumeButton)
@@ -386,7 +389,7 @@ class CardiacVolumeStitchingLogic(ScriptedLoadableModuleLogic):
                 n.HardenTransform()
 
             # Rigid registration on single frame
-            self.registerVolumes(proxyNodes, rigidTrNodes, masksTransformed, 0)
+            self.registerVolumes(proxyNodes, rigidTrNodes, masksTransformed, parSet=0)
 
             # Convert displacement fields to linear transforms
             for n in rigidTrNodes:
@@ -483,6 +486,7 @@ class CardiacVolumeStitchingLogic(ScriptedLoadableModuleLogic):
         elastix = Elastix.ElastixLogic()
         # elastix.logStandardOutput = True
         # elastix.deleteTemporaryFiles = False
+        # elastix.logCallback = self.processLog
 
         moduleDir = os.path.dirname(os.path.abspath(__file__))
         registrationResourcesDir = os.path.abspath(os.path.join(moduleDir, 'Resources', 'RegistrationParameters'))
@@ -542,24 +546,27 @@ class CardiacVolumeStitchingLogic(ScriptedLoadableModuleLogic):
 
         volumeBounds_ROI = np.array([min[0], max[1], min[2], max[3], min[4], max[5]])
 
-        outputSpacing = 0.4
+        outputSpacing = 0.3
 
         roiDim = np.zeros(3)
 
         for i in range(3):
-            roiDim[i] = (volumeBounds_ROI[i * 2 + 1] - volumeBounds_ROI[i * 2]) / outputSpacing;
+            roiDim[i] = (volumeBounds_ROI[i * 2 + 1] - volumeBounds_ROI[i * 2]) / outputSpacing
 
         roiDim = np.ceil(roiDim).astype('uint16')
 
         out.SetOrigin(volumeBounds_ROI[0], volumeBounds_ROI[2], volumeBounds_ROI[4])
         out.SetSpacing([outputSpacing] * 3)
 
+        outRASToIJK = vtk.vtkMatrix4x4()
+        out.GetRASToIJKMatrix(outRASToIJK)
+
         blend = vtk.vtkImageBlend()
         blend.SetBlendModeToCompound()
 
         # for each volume, resample into output space
         # will need to do for each frame in sequence as well
-        for n in volumeList:
+        for i,n in enumerate(volumeList):
             # Get transforms for input and output volumes
             inputIJK2RASMatrix = vtk.vtkMatrix4x4()
             n.GetIJKToRASMatrix(inputIJK2RASMatrix)
@@ -591,7 +598,7 @@ class CardiacVolumeStitchingLogic(ScriptedLoadableModuleLogic):
 
             # Get mask using threshold
             thresh = vtk.vtkImageThreshold()
-            thresh.ThresholdByUpper(2)
+            thresh.ThresholdByUpper(1)
             thresh.SetOutputScalarTypeToDouble()
             thresh.SetOutValue(0)
             thresh.SetInValue(1)
@@ -608,10 +615,56 @@ class CardiacVolumeStitchingLogic(ScriptedLoadableModuleLogic):
             dilateErode.SetInputConnection(thresh.GetOutputPort())
             dilateErode.Update()
 
+            # Get probe position for volume in IJK space
+            probeOrigin = [(bounds[i,j*2] + bounds[i,j*2+1]) / 2 for j in range(3)]
+            probeOrigin[2] = bounds[i,4]
+            probeOrigin.append(1)
+
+            probeOrigin = outRASToIJK.MultiplyPoint(probeOrigin)[0:3]
+
+            # Create sphere source for distance calculations
+            sphere = vtk.vtkSphereSource()
+            sphere.SetCenter(probeOrigin)
+            sphere.SetRadius(1)
+            sphere.Update()
+
+            # Get unsigned distance to sphere
+            distance = vtk.vtkUnsignedDistance()
+            distance.SetOutputScalarTypeToDouble()
+            distance.SetRadius(10000)
+            distance.CappingOff()
+            distance.SetBounds(0, roiDim[0], 0, roiDim[1], 0, roiDim[2])
+            distance.SetDimensions(roiDim+1)
+            distance.SetInputConnection(sphere.GetOutputPort())
+            distance.Update()
+
+            max = distance.GetOutput().GetScalarRange()[1]
+
+            math1 = vtk.vtkImageMathematics()
+            math1.SetOperationToAddConstant()
+            math1.SetConstantC(max * -1)
+            math1.SetInput1Data(distance.GetOutput())
+            math1.Update()
+
+            math2 = vtk.vtkImageMathematics()
+            math2.SetOperationToMultiplyByK()
+            math2.SetConstantK(-10 / max)
+            math2.SetInput1Data(math1.GetOutput())
+            math2.Update()
+
+
+            # Only keep region with data
+            mult = vtk.vtkImageMathematics()
+            mult.SetOperationToMultiply()
+            mult.SetInput1Data(dilateErode.GetOutput())
+            mult.SetInput2Data(math2.GetOutput())
+            mult.Update()
+
+
             # Append mask to image as alpha component
             app = vtk.vtkImageAppendComponents()
             app.AddInputData(resampler.GetOutput())
-            app.AddInputData(dilateErode.GetOutput())
+            app.AddInputData(mult.GetOutput())
             app.Update()
 
             blend.AddInputData(app.GetOutput())
@@ -743,6 +796,9 @@ class CardiacVolumeStitchingLogic(ScriptedLoadableModuleLogic):
         slicer.mrmlScene.RemoveNode(segmentationNode)
 
         return labelNode
+
+    def processLog(self, text):
+        slicer.app.processEvents()
 
 
 class CardiacVolumeStitchingTest(ScriptedLoadableModuleTest):
