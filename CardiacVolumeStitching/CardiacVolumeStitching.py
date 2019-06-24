@@ -158,7 +158,6 @@ class CardiacVolumeStitchingWidget(ScriptedLoadableModuleWidget):
         self.applyButton.enabled = False
         parametersFormLayout.addRow(self.applyButton)
 
-
         # connections
         self.addVolumeButton.connect('clicked(bool)', self.onAddVolumeButton)
         self.removeVolumeButton.connect('clicked(bool)', self.onRemoveVolumeButton)
@@ -282,43 +281,6 @@ class CardiacVolumeStitchingLogic(ScriptedLoadableModuleLogic):
     def getInitializationPresets(self):
         return self._initializationPresets
 
-    def run(self):
-        # Replace with list from ui
-        nodes = [None] * 5
-        nodes[0] = slicer.util.getFirstNodeByClassByName('vtkMRMLScalarVolumeNode', '011 Transgastric 1 Cartesian')
-        nodes[1] = slicer.util.getFirstNodeByClassByName('vtkMRMLScalarVolumeNode', '011 Transgastric 2 Cartesian')
-        nodes[2] = slicer.util.getFirstNodeByClassByName('vtkMRMLScalarVolumeNode', '011 Transgastric 3 Cartesian')
-        nodes[3] = slicer.util.getFirstNodeByClassByName('vtkMRMLScalarVolumeNode', '011 Transgastric 4 Cartesian')
-
-        tr = vtk.vtkTransform()
-        # Rotates the en face view to the correct orientation with respect to transgastric views
-        tr.RotateWXYZ(98.4210581181494, 0.35740674433659325, -0.8628562094610169, -0.35740674433659314)
-        trnode = slicer.util.getFirstNodeByClassByName('vtkMRMLTransformNode', 'TEEProbeToRAS')
-        if not trnode or not trnode.GetName() == 'TEEProbeToRAS':
-            trnode = slicer.mrmlScene.AddNewNodeByClass('vtkMRMLTransformNode', 'TEEProbeToRAS')
-
-        trnode.SetAndObserveTransformToParent(tr)
-
-        ef = slicer.util.getFirstNodeByClassByName('vtkMRMLScalarVolumeNode', '011 Cartesian DICOM')
-        ef.SetAndObserveTransformNodeID(trnode.GetID())
-
-        temp_node = slicer.mrmlScene.AddNewNodeByClass('vtkMRMLScalarVolumeNode')
-        temp_node.Copy(ef)
-        # temp_node.SetName('temp_volume')
-        temp_node.SetAndObserveTransformNodeID(trnode.GetID())
-        temp_node.HardenTransform()
-        nodes[4] = temp_node
-
-        masks = [None] * 5
-        for i, n in enumerate(nodes):
-            masks[i] = self.generateMask(n)
-
-        self.registerVolumes(nodes, masks)
-        # self.mergeVolumes(nodes)
-
-        slicer.mrmlScene.RemoveNode(temp_node)
-        slicer.mrmlScene.RemoveNode(trnode)
-
     def stitchSequences(self, sequences, presets, outputSequence, masterSequence):
         # Check for input parameters
         if not sequences or not presets:
@@ -403,7 +365,7 @@ class CardiacVolumeStitchingLogic(ScriptedLoadableModuleLogic):
                     tr.Concatenate(self._initializationPresetTransforms[presets[i]])
                     tr.PostMultiply()
                     if i > 0:
-                        tr.Concatenate(rigidTrNodes[i-1].GetTransformToParent())
+                        tr.Concatenate(rigidTrNodes[i - 1].GetTransformToParent())
                     tr.Update()
 
             # Transform masks for use in non rigid phase of registration
@@ -429,7 +391,11 @@ class CardiacVolumeStitchingLogic(ScriptedLoadableModuleLogic):
                     n.SetAndObserveTransformNodeID(rigidTrNodes[i].GetID())
                     n.HardenTransform()
 
-                self.registerVolumes(proxyNodes, maskList=masksTransformed, parSet=1)
+                self.registerVolumes(proxyNodes, trNodes=nonRigidTrNodes, maskList=masksTransformed, parSet=1)
+
+                for i, n in enumerate(proxyNodes):
+                    n.SetAndObserveTransformNodeID(nonRigidTrNodes[i].GetID())
+                    n.HardenTransform()
 
                 # Merge Volumes
                 self.mergeVolumes(proxyNodes, outputVolume)
@@ -467,7 +433,6 @@ class CardiacVolumeStitchingLogic(ScriptedLoadableModuleLogic):
                     slicer.mrmlScene.RemoveNode(mask.GetDisplayNode().GetColorNode())
                 slicer.mrmlScene.RemoveNode(mask)
 
-
             # Create sequence browser for output if it does not already exist
             if not slicer.modules.sequencebrowser.logic().GetFirstBrowserNodeForSequenceNode(outputSequence):
                 outputSequenceBrowser = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLSequenceBrowserNode",
@@ -503,7 +468,7 @@ class CardiacVolumeStitchingLogic(ScriptedLoadableModuleLogic):
                 trNode = trNodes[i + 1]
             else:
                 trNode = None
-                outputVolume = volumeList[i+1]
+                outputVolume = volumeList[i + 1]
 
             if maskList and not isinstance(maskList, (list, tuple, np.ndarray)):
                 fixedMask = maskList
@@ -534,12 +499,11 @@ class CardiacVolumeStitchingLogic(ScriptedLoadableModuleLogic):
                                     fixedVolumeMaskNode=fixedMask,
                                     movingVolumeMaskNode=movingMask)
 
-
     def mergeVolumes(self, volumeList, out):
         # Get bounds of final volume
         bounds = np.zeros((len(volumeList), 6))
         for i in range(len(volumeList)):
-            volumeList[i].GetSliceBounds(bounds[i, :], None)
+            volumeList[i].GetRASBounds(bounds[i, :])
 
         min = bounds.min(0)
         max = bounds.max(0)
@@ -566,7 +530,7 @@ class CardiacVolumeStitchingLogic(ScriptedLoadableModuleLogic):
 
         # for each volume, resample into output space
         # will need to do for each frame in sequence as well
-        for i,n in enumerate(volumeList):
+        for i, n in enumerate(volumeList):
             # Get transforms for input and output volumes
             inputIJK2RASMatrix = vtk.vtkMatrix4x4()
             n.GetIJKToRASMatrix(inputIJK2RASMatrix)
@@ -597,27 +561,33 @@ class CardiacVolumeStitchingLogic(ScriptedLoadableModuleLogic):
             resampler.Update()
 
             # Get mask using threshold
+            gauss = vtk.vtkImageGaussianSmooth()
+            gauss.SetInputConnection(resampler.GetOutputPort())
+            gauss.SetStandardDeviation(1)
+            gauss.Update()
+
             thresh = vtk.vtkImageThreshold()
-            thresh.ThresholdByUpper(1)
+            thresh.ThresholdByUpper(0.1)
             thresh.SetOutputScalarTypeToDouble()
             thresh.SetOutValue(0)
             thresh.SetInValue(1)
             thresh.ReplaceInOn()
             thresh.ReplaceOutOn()
-            thresh.SetInputConnection(resampler.GetOutputPort())
+            thresh.SetInputConnection(gauss.GetOutputPort())
             thresh.Update()
 
             # Erode mask to eliminate boundary artifacts
             dilateErode = vtk.vtkImageDilateErode3D()
             dilateErode.SetDilateValue(0)
             dilateErode.SetErodeValue(1)
-            dilateErode.SetKernelSize(7, 7, 7)
+            dilateErode.SetKernelSize(9, 9, 9)
             dilateErode.SetInputConnection(thresh.GetOutputPort())
             dilateErode.Update()
 
+            # TODO Fix frustum model to properly identify probe origin
             # Get probe position for volume in IJK space
-            probeOrigin = [(bounds[i,j*2] + bounds[i,j*2+1]) / 2 for j in range(3)]
-            probeOrigin[2] = bounds[i,4]
+            probeOrigin = [(bounds[i, j * 2] + bounds[i, j * 2 + 1]) / 2 for j in range(3)]
+            probeOrigin[2] = bounds[i, 4]
             probeOrigin.append(1)
 
             probeOrigin = outRASToIJK.MultiplyPoint(probeOrigin)[0:3]
@@ -634,10 +604,11 @@ class CardiacVolumeStitchingLogic(ScriptedLoadableModuleLogic):
             distance.SetRadius(10000)
             distance.CappingOff()
             distance.SetBounds(0, roiDim[0], 0, roiDim[1], 0, roiDim[2])
-            distance.SetDimensions(roiDim+1)
+            distance.SetDimensions(roiDim + 1)
             distance.SetInputConnection(sphere.GetOutputPort())
             distance.Update()
 
+            # Invert distance and scale weights
             max = distance.GetOutput().GetScalarRange()[1]
 
             math1 = vtk.vtkImageMathematics()
@@ -648,18 +619,49 @@ class CardiacVolumeStitchingLogic(ScriptedLoadableModuleLogic):
 
             math2 = vtk.vtkImageMathematics()
             math2.SetOperationToMultiplyByK()
-            math2.SetConstantK(-10 / max)
+            math2.SetConstantK(-4 / max)
             math2.SetInput1Data(math1.GetOutput())
             math2.Update()
 
+            # Distance map ^ 4
+            mathSq = vtk.vtkImageMathematics()
+            mathSq.SetOperationToSquare()
+            mathSq.SetInput1Data(math2.GetOutput())
+            mathSq.Update()
+
+            mathSq2 = vtk.vtkImageMathematics()
+            mathSq2.SetOperationToSquare()
+            mathSq2.SetInput1Data(mathSq.GetOutput())
+            mathSq2.Update()
+
+            # Blur and threshold to identify structures
+            med = vtk.vtkImageMedian3D()
+            med.SetKernelSize(9, 9, 3)
+            med.SetInputData(resampler.GetOutput())
+            med.Update()
+
+            thresh = vtk.vtkImageThreshold()
+            thresh.ThresholdByUpper(110)
+            thresh.SetOutputScalarTypeToDouble()
+            thresh.SetOutValue(0)
+            thresh.SetInValue(25)
+            thresh.ReplaceInOn()
+            thresh.ReplaceOutOn()
+            thresh.SetInputConnection(med.GetOutputPort())
+            thresh.Update()
+
+            mathAdd = vtk.vtkImageMathematics()
+            mathAdd.SetOperationToAdd()
+            mathAdd.SetInput1Data(mathSq2.GetOutput())
+            mathAdd.SetInput2Data(thresh.GetOutput())
+            mathAdd.Update()
 
             # Only keep region with data
             mult = vtk.vtkImageMathematics()
             mult.SetOperationToMultiply()
             mult.SetInput1Data(dilateErode.GetOutput())
-            mult.SetInput2Data(math2.GetOutput())
+            mult.SetInput2Data(mathAdd.GetOutput())
             mult.Update()
-
 
             # Append mask to image as alpha component
             app = vtk.vtkImageAppendComponents()
