@@ -8,9 +8,9 @@
 
 //Components
 (Registration "MultiResolutionRegistration")
-(FixedImagePyramid "FixedRecursiveImagePyramid")
-(MovingImagePyramid "MovingRecursiveImagePyramid")
-(Interpolator "BSplineInterpolator")
+(FixedImagePyramid "FixedSmoothingImagePyramid")
+(MovingImagePyramid "MovingSmoothingImagePyramid")
+(Interpolator "LinearInterpolator")
 (Metric "NormalizedMutualInformation")
 (Optimizer "AdaptiveStochasticGradientDescent")
 (ResampleInterpolator "FinalBSplineInterpolator")
@@ -37,16 +37,13 @@
 (NumberOfHistogramBins 32 )
 
 //Number of spatial samples used to compute the mutual information in each resolution level:
-(ImageSampler "RandomSparseMask")
+(ImageSampler "RandomCoordinate")
 (UseRandomSampleRegion "false")
 (NumberOfSpatialSamples 4000 )
 (NewSamplesEveryIteration "true")
 (CheckNumberOfSamples "true")
 (MaximumNumberOfSamplingAttempts 10)
-(RequiredRatioOfValidSamples 0.15) 
-
-//Order of B-Spline interpolation used in each resolution level:
-(BSplineInterpolationOrder 1)
+(RequiredRatioOfValidSamples 0.05)
 
 //Order of B-Spline interpolation used for applying the final deformation:
 (FinalBSplineInterpolationOrder 3)
@@ -54,7 +51,6 @@
 //Default pixel value for pixels that come from outside the picture:
 (DefaultPixelValue 0)
 
-(WriteResultImage "true")
-(ResultImagePixelType "short")
-(ResultImageFormat "mhd")
+(WriteResultImage "false")
+
 

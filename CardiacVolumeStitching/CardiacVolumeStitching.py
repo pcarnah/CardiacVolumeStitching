@@ -1,9 +1,11 @@
+import gc
 import os
 import unittest
 import vtk, qt, ctk, slicer
 from slicer.ScriptedLoadableModule import *
 import logging
 import numpy as np
+import vtk.util.numpy_support as VN
 from six.moves import range
 from timeit import default_timer as timer
 
@@ -510,7 +512,7 @@ class CardiacVolumeStitchingLogic(ScriptedLoadableModuleLogic):
 
         volumeBounds_ROI = np.array([min[0], max[1], min[2], max[3], min[4], max[5]])
 
-        outputSpacing = 0.3
+        outputSpacing = 0.4
 
         roiDim = np.zeros(3)
 
@@ -557,24 +559,24 @@ class CardiacVolumeStitchingLogic(ScriptedLoadableModuleLogic):
             resampler.SetOutputExtent(0, roiDim[0], 0, roiDim[1], 0, roiDim[2])
             resampler.SetResliceTransform(resampleTransform)
             resampler.SetInterpolationModeToCubic()
-            resampler.SetOutputScalarType(vtk.VTK_DOUBLE)
-            resampler.Update()
+            resampler.SetOutputScalarType(vtk.VTK_FLOAT)
+            # resampler.Update()
 
             # Get mask using threshold
             gauss = vtk.vtkImageGaussianSmooth()
             gauss.SetInputConnection(resampler.GetOutputPort())
             gauss.SetStandardDeviation(1)
-            gauss.Update()
+            # gauss.Update()
 
             thresh = vtk.vtkImageThreshold()
             thresh.ThresholdByUpper(0.1)
-            thresh.SetOutputScalarTypeToDouble()
+            thresh.SetOutputScalarTypeToFloat()
             thresh.SetOutValue(0)
             thresh.SetInValue(1)
             thresh.ReplaceInOn()
             thresh.ReplaceOutOn()
             thresh.SetInputConnection(gauss.GetOutputPort())
-            thresh.Update()
+            # thresh.Update()
 
             # Erode mask to eliminate boundary artifacts
             dilateErode = vtk.vtkImageDilateErode3D()
@@ -582,7 +584,7 @@ class CardiacVolumeStitchingLogic(ScriptedLoadableModuleLogic):
             dilateErode.SetErodeValue(1)
             dilateErode.SetKernelSize(9, 9, 9)
             dilateErode.SetInputConnection(thresh.GetOutputPort())
-            dilateErode.Update()
+            # dilateErode.Update()
 
             # TODO Fix frustum model to properly identify probe origin
             # Get probe position for volume in IJK space
@@ -596,80 +598,82 @@ class CardiacVolumeStitchingLogic(ScriptedLoadableModuleLogic):
             sphere = vtk.vtkSphereSource()
             sphere.SetCenter(probeOrigin)
             sphere.SetRadius(1)
-            sphere.Update()
+            # sphere.Update()
 
             # Get unsigned distance to sphere
             distance = vtk.vtkUnsignedDistance()
-            distance.SetOutputScalarTypeToDouble()
+            distance.SetOutputScalarTypeToFloat()
             distance.SetRadius(10000)
             distance.CappingOff()
             distance.SetBounds(0, roiDim[0], 0, roiDim[1], 0, roiDim[2])
             distance.SetDimensions(roiDim + 1)
             distance.SetInputConnection(sphere.GetOutputPort())
-            distance.Update()
+            # distance.Update()
 
-            # Invert distance and scale weights
-            max = distance.GetOutput().GetScalarRange()[1]
+            invSquare = vtk.vtkProgrammableFilter()
 
-            math1 = vtk.vtkImageMathematics()
-            math1.SetOperationToAddConstant()
-            math1.SetConstantC(max * -1)
-            math1.SetInput1Data(distance.GetOutput())
-            math1.Update()
+            def invSquareCallback():
+                input = invSquare.GetInput()
+                output = invSquare.GetOutput()
 
-            math2 = vtk.vtkImageMathematics()
-            math2.SetOperationToMultiplyByK()
-            math2.SetConstantK(-4 / max)
-            math2.SetInput1Data(math1.GetOutput())
-            math2.Update()
+                output.ShallowCopy(input)
 
-            # Distance map ^ 4
-            mathSq = vtk.vtkImageMathematics()
-            mathSq.SetOperationToSquare()
-            mathSq.SetInput1Data(math2.GetOutput())
-            mathSq.Update()
+                scalars = output.GetPointData().GetScalars()
 
-            mathSq2 = vtk.vtkImageMathematics()
-            mathSq2.SetOperationToSquare()
-            mathSq2.SetInput1Data(mathSq.GetOutput())
-            mathSq2.Update()
+                npArr = VN.vtk_to_numpy(scalars)
+
+                m = npArr.max()
+                npArr = ((m - npArr) * (4.0 / m)) ** 4
+
+                outScalars = VN.numpy_to_vtk(npArr)
+                output.GetPointData().SetScalars(outScalars)
+
+
+            invSquare.SetExecuteMethod(invSquareCallback)
+            invSquare.SetInputConnection(distance.GetOutputPort())
+
 
             # Blur and threshold to identify structures
             med = vtk.vtkImageMedian3D()
             med.SetKernelSize(9, 9, 3)
-            med.SetInputData(resampler.GetOutput())
-            med.Update()
+            med.SetInputConnection(resampler.GetOutputPort())
+            # med.Update()
 
             thresh = vtk.vtkImageThreshold()
             thresh.ThresholdByUpper(110)
-            thresh.SetOutputScalarTypeToDouble()
+            thresh.SetOutputScalarTypeToFloat()
             thresh.SetOutValue(0)
             thresh.SetInValue(25)
             thresh.ReplaceInOn()
             thresh.ReplaceOutOn()
             thresh.SetInputConnection(med.GetOutputPort())
-            thresh.Update()
+            # thresh.Update()
 
             mathAdd = vtk.vtkImageMathematics()
             mathAdd.SetOperationToAdd()
-            mathAdd.SetInput1Data(mathSq2.GetOutput())
-            mathAdd.SetInput2Data(thresh.GetOutput())
-            mathAdd.Update()
+            mathAdd.SetInputConnection(0, invSquare.GetOutputPort())
+            mathAdd.SetInputConnection(1, thresh.GetOutputPort())
+            # mathAdd.Update()
 
             # Only keep region with data
             mult = vtk.vtkImageMathematics()
             mult.SetOperationToMultiply()
-            mult.SetInput1Data(dilateErode.GetOutput())
-            mult.SetInput2Data(mathAdd.GetOutput())
-            mult.Update()
+            mult.SetInputConnection(0, dilateErode.GetOutputPort())
+            mult.SetInputConnection(1, mathAdd.GetOutputPort())
+            # mult.Update()
 
             # Append mask to image as alpha component
             app = vtk.vtkImageAppendComponents()
-            app.AddInputData(resampler.GetOutput())
-            app.AddInputData(mult.GetOutput())
+            app.AddInputConnection(resampler.GetOutputPort())
+            app.AddInputConnection(mult.GetOutputPort())
             app.Update()
 
-            blend.AddInputData(app.GetOutput())
+            im = vtk.vtkImageData()
+            im.DeepCopy(app.GetOutput())
+
+            gc.collect()
+
+            blend.AddInputData(im)
 
         # Set output volume
         blend.Update()
@@ -678,7 +682,7 @@ class CardiacVolumeStitchingLogic(ScriptedLoadableModuleLogic):
         extract = vtk.vtkImageExtractComponents()
         extract.SetComponents(0)
         extract.SetInputConnection(blend.GetOutputPort())
-        extract.Update()
+        # extract.Update()
 
         cast = vtk.vtkImageCast()
         cast.SetOutputScalarTypeToUnsignedChar()
