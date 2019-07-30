@@ -339,7 +339,6 @@ class CardiacVolumeStitchingLogic(ScriptedLoadableModuleLogic):
         # Get proxy nodes and generate masks
         proxyNodes = [seqBrowser.GetProxyNode(n) for n in nodes]
 
-
         try:
             qt.QApplication.setOverrideCursor(qt.Qt.WaitCursor)
             numberOfDataNodes = masterSequence.GetNumberOfDataNodes()
@@ -352,7 +351,6 @@ class CardiacVolumeStitchingLogic(ScriptedLoadableModuleLogic):
             # Apply positional initialization and align centers for maximum overlap to begin automatic registration
             initTrs = [sitk.Transform(self._initializationPresetTransforms[presets[i]]) for i, _ in enumerate(sitkIms)]
             initTrs = self.initialAlignment(sitkIms, initialTrs=initTrs)
-
 
             # Perform semi-simultaneous rigid registration step
             rigidTrs = self.semiSimultaneousRegister(sitkIms, initialTrs=initTrs, numCycles=5)
@@ -372,7 +370,7 @@ class CardiacVolumeStitchingLogic(ScriptedLoadableModuleLogic):
                 sitkIms = [sitkUtils.PullVolumeFromSlicer(n) for n in proxyNodes]
 
                 finalTrs = self.semiSimultaneousRegister(sitkIms, initialTrs=rigidTrs,
-                                                            numCycles=1, parMap=self._parameterMaps[1])
+                                                         numCycles=1, parMap=self._parameterMaps[1])
 
                 outputImage = self.mergeVolumesSITK(sitkIms, finalTrs)
                 sitkUtils.PushVolumeToSlicer(outputImage, outputVolume)
@@ -441,18 +439,18 @@ class CardiacVolumeStitchingLogic(ScriptedLoadableModuleLogic):
 
         # Semi simultaneous registration algorithm (Wachinger, C. et al., 2007)
         for cycle in range(numCycles):
-            print('Starting cycle {}'.format(cycle+1))
+            print('Starting cycle {}'.format(cycle + 1))
             slicer.app.processEvents(qt.QEventLoop.ExcludeUserInputEvents)
 
             for i, movingVolume in enumerate(volumes):
-                fixedVolumes = [fixed] + volumes[0:i] + volumes[i+1:]
-                fixedMasks = [fixedMask] + masks[0:i] + masks[i+1:]
+                fixedVolumes = [fixed] + volumes[0:i] + volumes[i + 1:]
+                fixedMasks = [fixedMask] + masks[0:i] + masks[i + 1:]
 
                 movingMask = masks[i]
 
                 _, tr = self.registerVolumes(fixedVolumes, movingVolume, fixedMasks, movingMask, parMap)
 
-                print('Registered volume {} in cycle {}'.format(i+1, cycle+1))
+                print('Registered volume {} in cycle {}'.format(i + 1, cycle + 1))
 
                 volumes[i] = self.getResampledImage(movingVolume, tr)
                 masks[i] = self.generateMask(volumes[i])
@@ -467,8 +465,6 @@ class CardiacVolumeStitchingLogic(ScriptedLoadableModuleLogic):
             tr.MakeUnique()
 
         return finalTrs
-
-
 
     def registerVolumes(self, fixedVolumeList, movingVolume, fixedMaskList=(), movingMask=None,
                         parMap=None):
@@ -797,10 +793,6 @@ class CardiacVolumeStitchingLogic(ScriptedLoadableModuleLogic):
         resample.SetOutputPixelType(sitkImage.GetPixelID())
 
         return resample.Execute(sitkImage)
-
-
-
-
 
 
 class CardiacVolumeStitchingTest(ScriptedLoadableModuleTest):
