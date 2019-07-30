@@ -1,4 +1,5 @@
-// Description: affine, MI, ASGD
+// Description: B-Spline, NCC, ASGD
+// Designed for non-rigid portion of semi-simultaneous registration of cardiac US images
 
 //ImageTypes
 (FixedInternalImagePixelType "float")
@@ -8,18 +9,19 @@
 
 //Components
 (Registration "MultiResolutionRegistration")
-(FixedImagePyramid "FixedRecursiveImagePyramid")
-(MovingImagePyramid "MovingRecursiveImagePyramid")
-(Interpolator "BSplineInterpolator")
-(Metric "NormalizedMutualInformation")
+(FixedImagePyramid "FixedSmoothingImagePyramid")
+(MovingImagePyramid "MovingSmoothingImagePyramid")
+(Interpolator "LinearInterpolator")
+(Metric "AdvancedNormalizedCorrelation")
 (Optimizer "AdaptiveStochasticGradientDescent")
-(ResampleInterpolator "FinalBSplineInterpolator")
+(ResampleInterpolator "FinalLinearInterpolator")
 (Resampler "DefaultResampler")
 (Transform "BSplineTransform")
 
-(ErodeMask "true" )
+(ErodeMask "false" )
 
-(NumberOfResolutions 2)
+(NumberOfResolutions 1)
+(ImagePyramidSchedule 2 2 2 )
 
 (HowToCombineTransforms "Compose")
 (AutomaticTransformInitialization "false")
@@ -31,30 +33,24 @@
 (ShowExactMetricValue "false")
 
 //Maximum number of iterations in each resolution level:
-(MaximumNumberOfIterations 100 ) 
+(MaximumNumberOfIterations 20 )
 
 //Number of grey level bins in each resolution level:
 (NumberOfHistogramBins 32 )
 
 //Number of spatial samples used to compute the mutual information in each resolution level:
-(ImageSampler "RandomSparseMask")
+(ImageSampler "RandomCoordinate")
 (UseRandomSampleRegion "false")
-(NumberOfSpatialSamples 2000 )
+(NumberOfSpatialSamples 5000 )
 (NewSamplesEveryIteration "true")
-(CheckNumberOfSamples "true")
+(CheckNumberOfSamples "false")
 (MaximumNumberOfSamplingAttempts 10)
-(RequiredRatioOfValidSamples 0.15) 
-
-//Order of B-Spline interpolation used in each resolution level:
-(BSplineInterpolationOrder 1)
-
-//Order of B-Spline interpolation used for applying the final deformation:
-(FinalBSplineInterpolationOrder 3)
+(RequiredRatioOfValidSamples 0.05)
 
 //Default pixel value for pixels that come from outside the picture:
 (DefaultPixelValue 0)
 
-(WriteResultImage "true")
+(WriteResultImage "false")
 (ResultImagePixelType "short")
 (ResultImageFormat "mhd")
 

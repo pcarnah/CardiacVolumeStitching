@@ -7,6 +7,9 @@ import logging
 import numpy as np
 import vtk.util.numpy_support as VN
 from six.moves import range
+import SimpleITK as sitk
+import sitkUtils
+import SimpleElastix
 from timeit import default_timer as timer
 
 
@@ -255,7 +258,13 @@ class CardiacVolumeStitchingLogic(ScriptedLoadableModuleLogic):
     """
 
     def __init__(self):
-        self._parameterSets = [['Par0001Rigid.txt'], ['Par0001NonRigid.txt']]
+        parameterSets = [['Par0001Rigid.txt'], ['Par0001NonRigid.txt'], ['Par0001Initialize.txt']]
+
+        moduleDir = os.path.dirname(os.path.abspath(__file__))
+        registrationResourcesDir = os.path.abspath(os.path.join(moduleDir, 'Resources', 'RegistrationParameters'))
+
+        self._parameterMaps = [SimpleElastix.ReadParameterFile(os.path.join(registrationResourcesDir, parSet[0])) for
+                               parSet in parameterSets]
 
         self._initializationPresets = [['Transesophageal', 'TEE'], ['Transgastric', 'TG'], ['Transthoracic', 'TTE']]
 
@@ -266,24 +275,42 @@ class CardiacVolumeStitchingLogic(ScriptedLoadableModuleLogic):
         tr = vtk.vtkTransform()
         tr.Identity()
         tr.RotateWXYZ(98.4210581181494, 0.35740674433659325, -0.8628562094610169, -0.35740674433659314)
+
+        tr = sitk.Similarity3DTransform()
+        tr.SetRotation([-0.35740674433659325, 0.8628562094610169, -0.35740674433659314], np.deg2rad(98.4210581181494))
         # Rotates the en face view to the correct orientation with respect to transgastric views
-        self._initializationPresetTransforms[InitializationPresets_TEE] = tr
+        self._initializationPresetTransforms[InitializationPresets_TEE] = tr.GetInverse()
 
         # TG Transform
         # Uses identity
         tr = vtk.vtkTransform()
         tr.Identity()
+
+        tr = sitk.Euler3DTransform()
         self._initializationPresetTransforms[InitializationPresets_TG] = tr
 
         # TODO TTE Transform
         tr = vtk.vtkTransform()
         tr.Identity()
+
+        tr = sitk.Euler3DTransform()
         self._initializationPresetTransforms[InitializationPresets_TTE] = tr
 
     def getInitializationPresets(self):
         return self._initializationPresets
 
     def stitchSequences(self, sequences, presets, outputSequence, masterSequence):
+        """
+        Stitch a group of sequences together. First applies rigid registration using semi-simultaneous method,
+        then for each frame in sequence applies deformable registration. Aligned volumes are re-sampled and merged
+        to generate output sequence.
+        :param sequences: List of Sequence nodes
+        :param presets: TODO remove
+        :param outputSequence: Sequence node to store final result
+        :param masterSequence: Sequence node to act as master for frame rate
+        :return: None
+        """
+
         # Check for input parameters
         if not sequences or not presets:
             logging.debug("stitchSequences: Missing argument")
@@ -311,70 +338,24 @@ class CardiacVolumeStitchingLogic(ScriptedLoadableModuleLogic):
 
         # Get proxy nodes and generate masks
         proxyNodes = [seqBrowser.GetProxyNode(n) for n in nodes]
-        masks = [self.generateMask(n) for n in proxyNodes]
-        masksTransformed = [slicer.mrmlScene.AddNewNodeByClass('vtkMRMLLabelMapVolumeNode') for _ in masks]
 
-        # Create temporary transform nodes
-        initialTrNodes = []
-        for tr in self._initializationPresetTransforms:
-            trNode = slicer.mrmlScene.AddNewNodeByClass('vtkMRMLTransformNode')
-            trNode.SetAndObserveTransformToParent(tr)
-            initialTrNodes.append(trNode)
-
-        # Create transform nodes to store rigid registrations
-        rigidTrNodes = []
-        for i in range(len(proxyNodes)):
-            tr = slicer.mrmlScene.AddNewNodeByClass('vtkMRMLTransformNode')
-            tr.SetAndObserveTransformToParent(vtk.vtkTransform())
-            rigidTrNodes.append(tr)
-
-        # Create final transform nodes
-        nonRigidTrNodes = []
-        for i in range(len(proxyNodes)):
-            tr = slicer.mrmlScene.AddNewNodeByClass('vtkMRMLTransformNode')
-            tr.SetAndObserveTransformToParent(vtk.vtkTransform())
-            nonRigidTrNodes.append(tr)
 
         try:
             qt.QApplication.setOverrideCursor(qt.Qt.WaitCursor)
             numberOfDataNodes = masterSequence.GetNumberOfDataNodes()
 
-            seqBrowser.SetSelectedItemNumber(2)
+            seqBrowser.SetSelectedItemNumber(0)
             slicer.modules.sequencebrowser.logic().UpdateProxyNodesFromSequences(seqBrowser)
 
-            # Harden initial transforms for proxy nodes so that the transformed volume is used
-            for i, n in enumerate(proxyNodes):
-                n.SetAndObserveTransformNodeID(initialTrNodes[presets[i]].GetID())
-                n.HardenTransform()
-            # Transform masks for use in registration
-            for i, n in enumerate(masksTransformed):
-                n.Copy(masks[i])
-                n.SetAndObserveTransformNodeID(initialTrNodes[presets[i]].GetID())
-                n.HardenTransform()
+            sitkIms = [sitkUtils.PullVolumeFromSlicer(n) for n in proxyNodes]
 
-            # Rigid registration on single frame
-            self.registerVolumes(proxyNodes, rigidTrNodes, masksTransformed, parSet=0)
+            # Apply positional initialization and align centers for maximum overlap to begin automatic registration
+            initTrs = [sitk.Transform(self._initializationPresetTransforms[presets[i]]) for i, _ in enumerate(sitkIms)]
+            initTrs = self.initialAlignment(sitkIms, initialTrs=initTrs)
 
-            # Convert displacement fields to linear transforms
-            for n in rigidTrNodes:
-                self.getElastixRigidFromDisplacementGrid(n, n)
 
-            # Concatenate additional transforms
-            for i in range(len(rigidTrNodes)):
-                tr = rigidTrNodes[i].GetTransformToParent()
-                if tr:
-                    tr.PreMultiply()
-                    tr.Concatenate(self._initializationPresetTransforms[presets[i]])
-                    tr.PostMultiply()
-                    if i > 0:
-                        tr.Concatenate(rigidTrNodes[i - 1].GetTransformToParent())
-                    tr.Update()
-
-            # Transform masks for use in non rigid phase of registration
-            for i, n in enumerate(masksTransformed):
-                n.Copy(masks[i])
-                n.SetAndObserveTransformNodeID(rigidTrNodes[i].GetID())
-                n.HardenTransform()
+            # Perform semi-simultaneous rigid registration step
+            rigidTrs = self.semiSimultaneousRegister(sitkIms, initialTrs=initTrs, numCycles=5)
 
             # Loop through sequence browser
             #
@@ -388,19 +369,13 @@ class CardiacVolumeStitchingLogic(ScriptedLoadableModuleLogic):
 
                 # Register Volumes
 
-                # Harden rigid transforms for this iteration
-                for i, n in enumerate(proxyNodes):
-                    n.SetAndObserveTransformNodeID(rigidTrNodes[i].GetID())
-                    n.HardenTransform()
+                sitkIms = [sitkUtils.PullVolumeFromSlicer(n) for n in proxyNodes]
 
-                self.registerVolumes(proxyNodes, trNodes=nonRigidTrNodes, maskList=masksTransformed, parSet=1)
+                finalTrs = self.semiSimultaneousRegister(sitkIms, initialTrs=rigidTrs,
+                                                            numCycles=1, parMap=self._parameterMaps[1])
 
-                for i, n in enumerate(proxyNodes):
-                    n.SetAndObserveTransformNodeID(nonRigidTrNodes[i].GetID())
-                    n.HardenTransform()
-
-                # Merge Volumes
-                self.mergeVolumes(proxyNodes, outputVolume)
+                outputImage = self.mergeVolumesSITK(sitkIms, finalTrs)
+                sitkUtils.PushVolumeToSlicer(outputImage, outputVolume)
 
                 # Saved stitched result
                 outputSequence.SetDataNodeAtValue(outputVolume,
@@ -416,25 +391,6 @@ class CardiacVolumeStitchingLogic(ScriptedLoadableModuleLogic):
             seqBrowser.RemoveAllSequenceNodes()
             slicer.mrmlScene.RemoveNode(seqBrowser)
 
-            for trNode in initialTrNodes:
-                slicer.mrmlScene.RemoveNode(trNode)
-
-            for trNode in rigidTrNodes:
-                slicer.mrmlScene.RemoveNode(trNode)
-
-            for trNode in nonRigidTrNodes:
-                slicer.mrmlScene.RemoveNode(trNode)
-
-            for mask in masks:
-                if mask and mask.GetDisplayNode():
-                    slicer.mrmlScene.RemoveNode(mask.GetDisplayNode().GetColorNode())
-                slicer.mrmlScene.RemoveNode(mask)
-
-            for mask in masksTransformed:
-                if mask and mask.GetDisplayNode():
-                    slicer.mrmlScene.RemoveNode(mask.GetDisplayNode().GetColorNode())
-                slicer.mrmlScene.RemoveNode(mask)
-
             # Create sequence browser for output if it does not already exist
             if not slicer.modules.sequencebrowser.logic().GetFirstBrowserNodeForSequenceNode(outputSequence):
                 outputSequenceBrowser = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLSequenceBrowserNode",
@@ -443,69 +399,174 @@ class CardiacVolumeStitchingLogic(ScriptedLoadableModuleLogic):
 
         return
 
-    def registerVolumes(self, volumeList, trNodes=None, maskList=None, parSet=None):
+    def semiSimultaneousRegister(self, volumeList, fixedVolume=0, initialTrs=None, numCycles=10, parMap=None):
+        """
+        Runs semi-simultaneous registration algorithm describe by Wachinger, C. et al., (2007). This method works by
+        registering each moving volume to all other volumes in turn, for a set number of cycles.
+        :param volumeList: List of volumes to group-register
+        :param fixedVolume: Index of fixed volume in list
+        :param initalsTrs: List of initial transforms
+        :param numCycles: Number of cycles to run algorithm
+        :param parMap: ParameterMap
+        :return: List of transforms
+        """
 
-        if not volumeList:
-            logging.debug('registerVolumes: missing parameter')
+        if initialTrs:
+            volumeList = [self.getResampledImage(im, tr) for im, tr in zip(volumeList, initialTrs)]
+
+            trs = initialTrs[0:fixedVolume] + initialTrs[fixedVolume + 1:]
+
+            # Make copies of transforms to avoid side effects
+            trs = [sitk.Transform(tr) for tr in trs]
+            fixedTr = sitk.Transform(initialTrs[fixedVolume])
+        else:
+            trs = [sitk.Transform() for _ in range(len(volumeList) - 1)]
+            fixedTr = sitk.Transform()
+
+        volumes = volumeList[0:fixedVolume] + volumeList[fixedVolume + 1:]
+        fixed = volumeList[fixedVolume]
+        masks = [self.generateMask(im) for im in volumes]
+        fixedMask = self.generateMask(fixed)
+
+        if not parMap:
+            parMap = self._parameterMaps[0]
+
+        parMap = SimpleElastix.ParameterMap(parMap)
+
+        # Set fixed volume weight higher
+        w = 3.0
+        parMap["Metric0Weight"] = [str(w / (len(volumes) + w - 1))]
+        for i in range(1, len(volumes)):
+            parMap["Metric{}Weight".format(i)] = [str(1.0 / (len(volumes) + w - 1))]
+
+        # Semi simultaneous registration algorithm (Wachinger, C. et al., 2007)
+        for cycle in range(numCycles):
+            print('Starting cycle {}'.format(cycle+1))
+            slicer.app.processEvents(qt.QEventLoop.ExcludeUserInputEvents)
+
+            for i, movingVolume in enumerate(volumes):
+                fixedVolumes = [fixed] + volumes[0:i] + volumes[i+1:]
+                fixedMasks = [fixedMask] + masks[0:i] + masks[i+1:]
+
+                movingMask = masks[i]
+
+                _, tr = self.registerVolumes(fixedVolumes, movingVolume, fixedMasks, movingMask, parMap)
+
+                print('Registered volume {} in cycle {}'.format(i+1, cycle+1))
+
+                volumes[i] = self.getResampledImage(movingVolume, tr)
+                masks[i] = self.generateMask(volumes[i])
+
+                trs[i].AddTransform(tr)
+
+                slicer.app.processEvents(qt.QEventLoop.ExcludeUserInputEvents)
+
+        finalTrs = trs[0:fixedVolume] + [fixedTr] + trs[fixedVolume:]
+        for tr in finalTrs:
+            tr.FlattenTransform()
+            tr.MakeUnique()
+
+        return finalTrs
+
+
+
+    def registerVolumes(self, fixedVolumeList, movingVolume, fixedMaskList=(), movingMask=None,
+                        parMap=None):
+        """
+        Runs registration from single moving image to 1 or more fixed images. Takes images, masks, and parameter map.
+        :param fixedVolumeList: List of SimpleITK images for fixed images
+        :param movingVolume: Single SimpleITK image for moving image
+        :param fixedMaskList: List of SimpleITK images for fixed image masks
+        :param movingMask: Single SimpleITK image for moving image mask
+        :param parMap: ParameterMap specifying registration parameters
+        :return: Re-sampled image, Transform
+        """
+
+        if not fixedVolumeList or not movingVolume:
+            logging.debug('simultaneuousRegister: missing parameter')
             return
 
-        import Elastix
-        elastix = Elastix.ElastixLogic()
-        # elastix.logStandardOutput = True
-        # elastix.deleteTemporaryFiles = False
-        # elastix.logCallback = self.processLog
+        if not isinstance(fixedVolumeList[0], sitk.Image) or not isinstance(movingVolume, sitk.Image):
+            logging.debug('Expected volumes of type SimpleITK Image')
+            return
 
-        moduleDir = os.path.dirname(os.path.abspath(__file__))
-        registrationResourcesDir = os.path.abspath(os.path.join(moduleDir, 'Resources', 'RegistrationParameters'))
+        if not parMap:
+            parMap = self._parameterMaps[0]
 
-        elastix.registrationParameterFilesDir = registrationResourcesDir
+        fixedCount = len(fixedVolumeList)
 
-        for i in range(len(volumeList) - 1):
+        # Use copy constructor to get local copy of map
+        parMap = SimpleElastix.ParameterMap(parMap)
 
-            outputVolume = None
+        # Set parameters to match number of fixed images
+        parMap['Registration'] = ['MultiMetricMultiResolutionRegistration']
+        parMap['FixedImagePyramid'] = parMap['FixedImagePyramid'] * fixedCount
+        parMap['Metric'] = parMap['Metric'] * fixedCount
+        parMap['ImageSampler'] = parMap['ImageSampler'] * fixedCount
 
-            if trNodes and not isinstance(trNodes, (list, tuple, np.ndarray)):
-                trNode = trNodes
-            elif trNodes and len(trNodes) > i + 1:
-                trNode = trNodes[i + 1]
-            else:
-                trNode = None
-                outputVolume = volumeList[i + 1]
+        # Create elastix filter and set parameters
+        selx = SimpleElastix.ElastixImageFilter()
+        selx.SetParameterMap(parMap)
 
-            if maskList and not isinstance(maskList, (list, tuple, np.ndarray)):
-                fixedMask = maskList
-                movingMask = None
-            elif maskList and len(maskList) == 1:
-                fixedMask = maskList[0]
-                movingMask = None
-            elif maskList and len(maskList) > i + 1:
-                fixedMask = maskList[i]
-                movingMask = maskList[i + 1]
-            else:
-                fixedMask = None
-                movingMask = None
+        for im in fixedVolumeList:
+            selx.AddFixedImage(im)
 
-            if parSet and not isinstance(parSet, (list, tuple, np.ndarray)):
-                parIdx = parSet
-            elif parSet and len(parSet) == 1:
-                parIdx = parSet[0]
-            elif parSet and len(parSet) > i:
-                parIdx = parSet[i]
-            else:
-                parIdx = 0
+        for im in fixedMaskList:
+            selx.AddFixedMask(im)
 
-            elastix.registerVolumes(volumeList[i], volumeList[i + 1],
-                                    self._parameterSets[parIdx],
-                                    outputTransformNode=trNode,
-                                    outputVolumeNode=outputVolume,
-                                    fixedVolumeMaskNode=fixedMask,
-                                    movingVolumeMaskNode=movingMask)
+        selx.SetMovingImage(movingVolume)
+        if movingMask:
+            selx.SetMovingMask(movingMask)
 
-    def mergeVolumes(self, volumeList, out):
+        selx.LogToConsoleOn()
+        selx.LogToFileOff()
+        selx.SetOutputDirectory('')
+
+        resultImage = selx.Execute()
+
+        conv = SimpleElastix.TransformConverter()
+        conv.SetParameterMap(selx.GetTransformParameterMap()[0])
+        tr = conv.Execute()
+
+        return resultImage, tr
+
+    def initialAlignment(self, volumeList, fixedVolume=0, initialTrs=None):
+
+        volumes = volumeList[0:fixedVolume] + volumeList[fixedVolume + 1:]
+        fixed = volumeList[fixedVolume]
+        masks = [self.generateMask(im, 0) for im in volumes]
+        fixedMask = self.generateMask(fixed, 0)
+
+        if initialTrs:
+            trs = initialTrs[0:fixedVolume] + initialTrs[fixedVolume + 1:]
+
+            # Make copies of transforms to avoid side effects
+            trs = [sitk.Transform(tr) for tr in trs]
+            fixedTr = sitk.Transform(initialTrs[fixedVolume])
+        else:
+            trs = [sitk.Euler3DTransform() for _ in volumes]
+            fixedTr = sitk.Euler3DTransform()
+
+        for i, im in enumerate(volumes):
+            # Perform initial alignment using moments
+            trs[i] = sitk.CenteredTransformInitializer(fixed,
+                                                       im,
+                                                       trs[i],
+                                                       sitk.CenteredTransformInitializerFilter.GEOMETRY)
+
+        finalTrs = trs[0:fixedVolume] + [fixedTr] + trs[fixedVolume:]
+        for tr in finalTrs:
+            tr.FlattenTransform()
+            tr.MakeUnique()
+
+        return finalTrs
+
+    def mergeVolumesSITK(self, volumeList, transforms):
+
         # Get bounds of final volume
         bounds = np.zeros((len(volumeList), 6))
-        for i in range(len(volumeList)):
-            volumeList[i].GetRASBounds(bounds[i, :])
+        for i, im in enumerate(volumeList):
+            bounds[i, :] = self.getBounds(im, transforms[i], True)
 
         min = bounds.min(0)
         max = bounds.max(0)
@@ -521,290 +582,225 @@ class CardiacVolumeStitchingLogic(ScriptedLoadableModuleLogic):
 
         roiDim = np.ceil(roiDim).astype('uint16')
 
-        out.SetOrigin(volumeBounds_ROI[0], volumeBounds_ROI[2], volumeBounds_ROI[4])
-        out.SetSpacing([outputSpacing] * 3)
+        # Crete reference image for resampling
+        refImage = sitk.Image(*roiDim.tolist(), sitk.sitkFloat32)
+        refImage.SetOrigin([volumeBounds_ROI[1], volumeBounds_ROI[3], volumeBounds_ROI[4]])
+        refImage.SetSpacing([outputSpacing] * 3)
+        refImage.SetDirection([-1.0, 0.0, 0.0, 0.0, -1.0, 0.0, 0.0, 0.0, 1.0])
 
-        outRASToIJK = vtk.vtkMatrix4x4()
-        out.GetRASToIJKMatrix(outRASToIJK)
+        resampledIms = [None] * len(volumeList)
+        structureIms = [None] * len(volumeList)
 
-        blend = vtk.vtkImageBlend()
-        blend.SetBlendModeToCompound()
+        alphaSumIm = sitk.Image(refImage)
 
         # for each volume, resample into output space
-        # will need to do for each frame in sequence as well
-        for i, n in enumerate(volumeList):
-            # Get transforms for input and output volumes
-            inputIJK2RASMatrix = vtk.vtkMatrix4x4()
-            n.GetIJKToRASMatrix(inputIJK2RASMatrix)
-            referenceRAS2IJKMatrix = vtk.vtkMatrix4x4()
-            out.GetRASToIJKMatrix(referenceRAS2IJKMatrix)
-            inputRAS2RASTransform = vtk.vtkGeneralTransform()
-            if n.GetTransformNodeID():
-                slicer.mrmlScene.GetNodeByID(n.GetTransformNodeID()).GetTransformToWorld(inputRAS2RASTransform)
+        for i, im in enumerate(volumeList):
+            start = timer()
+            resIm = self.getResampledImage(sitk.Cast(im, sitk.sitkFloat32), transforms[i], refImage, sitk.sitkLinear)
 
-            # Create resample transform from reference volume to input
-            resampleTransform = vtk.vtkGeneralTransform()
-            resampleTransform.Identity()
-            resampleTransform.PostMultiply()
-            resampleTransform.Concatenate(inputIJK2RASMatrix)
-            resampleTransform.Concatenate(inputRAS2RASTransform)
-            resampleTransform.Concatenate(referenceRAS2IJKMatrix)
-            resampleTransform.Inverse()
+            end = timer()
+            print("resample: {}".format(end - start))
 
-            # Resample the image to the output space using transform
-            resampler = vtk.vtkImageReslice()
-            resampler.SetInputConnection(n.GetImageDataConnection())
-            resampler.SetOutputOrigin(0, 0, 0)
-            resampler.SetOutputSpacing(1, 1, 1)
-            resampler.SetOutputExtent(0, roiDim[0], 0, roiDim[1], 0, roiDim[2])
-            resampler.SetResliceTransform(resampleTransform)
-            resampler.SetInterpolationModeToCubic()
-            resampler.SetOutputScalarType(vtk.VTK_FLOAT)
-            # resampler.Update()
+            start = timer()
+            mask = self.generateMask(resIm, 2)
+            # mask = self.getResampledImage(mask, transforms[i], refImage, sitk.sitkNearestNeighbor)
+            mask = sitk.Cast(mask, sitk.sitkFloat32)
+            end = timer()
+            print("generate mask: {}".format(end - start))
 
-            # Get mask using threshold
-            gauss = vtk.vtkImageGaussianSmooth()
-            gauss.SetInputConnection(resampler.GetOutputPort())
-            gauss.SetStandardDeviation(1)
-            # gauss.Update()
-
-            thresh = vtk.vtkImageThreshold()
-            thresh.ThresholdByUpper(0.1)
-            thresh.SetOutputScalarTypeToFloat()
-            thresh.SetOutValue(0)
-            thresh.SetInValue(1)
-            thresh.ReplaceInOn()
-            thresh.ReplaceOutOn()
-            thresh.SetInputConnection(gauss.GetOutputPort())
-            # thresh.Update()
-
-            # Erode mask to eliminate boundary artifacts
-            dilateErode = vtk.vtkImageDilateErode3D()
-            dilateErode.SetDilateValue(0)
-            dilateErode.SetErodeValue(1)
-            dilateErode.SetKernelSize(9, 9, 9)
-            dilateErode.SetInputConnection(thresh.GetOutputPort())
-            # dilateErode.Update()
-
-            # TODO Fix frustum model to properly identify probe origin
             # Get probe position for volume in IJK space
-            probeOrigin = [(bounds[i, j * 2] + bounds[i, j * 2 + 1]) / 2 for j in range(3)]
-            probeOrigin[2] = bounds[i, 4]
-            probeOrigin.append(1)
+            probeOriginLPS = [(bounds[i, j * 2] + bounds[i, j * 2 + 1]) / 2 for j in range(3)]
+            probeOriginLPS[2] = bounds[i, 4]
 
-            probeOrigin = outRASToIJK.MultiplyPoint(probeOrigin)[0:3]
+            probeOriginIJK = resIm.TransformPhysicalPointToIndex(probeOriginLPS)
 
-            # Create sphere source for distance calculations
-            sphere = vtk.vtkSphereSource()
-            sphere.SetCenter(probeOrigin)
-            sphere.SetRadius(1)
-            # sphere.Update()
+            distanceSource = sitk.Image(refImage)
+            distanceSource.MakeUnique()
+            distanceSource[probeOriginIJK] = 1
 
-            # Get unsigned distance to sphere
-            distance = vtk.vtkUnsignedDistance()
-            distance.SetOutputScalarTypeToFloat()
-            distance.SetRadius(10000)
-            distance.CappingOff()
-            distance.SetBounds(0, roiDim[0], 0, roiDim[1], 0, roiDim[2])
-            distance.SetDimensions(roiDim + 1)
-            distance.SetInputConnection(sphere.GetOutputPort())
-            # distance.Update()
+            distance = sitk.SignedMaurerDistanceMap(sitk.Cast(distanceSource, sitk.sitkUInt8),
+                                                    squaredDistance=False, useImageSpacing=True)
+            distance = sitk.Cast(distance, sitk.sitkFloat32)
 
-            invSquare = vtk.vtkProgrammableFilter()
+            minmax = sitk.MinimumMaximumImageFilter()
+            minmax.Execute(distance)
+            imageHighestIntensity = minmax.GetMaximum()
+            imageLowestIntensity = minmax.GetMinimum()
 
-            def invSquareCallback():
-                input = invSquare.GetInput()
-                output = invSquare.GetOutput()
-
-                output.ShallowCopy(input)
-
-                scalars = output.GetPointData().GetScalars()
-
-                npArr = VN.vtk_to_numpy(scalars)
-
-                m = npArr.max()
-                npArr = ((m - npArr) * (4.0 / m)) ** 4
-
-                outScalars = VN.numpy_to_vtk(npArr)
-                output.GetPointData().SetScalars(outScalars)
-
-
-            invSquare.SetExecuteMethod(invSquareCallback)
-            invSquare.SetInputConnection(distance.GetOutputPort())
-
+            distance = ((imageHighestIntensity - distance) * (4.0 / imageHighestIntensity)) ** 4
 
             # Blur and threshold to identify structures
-            med = vtk.vtkImageMedian3D()
-            med.SetKernelSize(9, 9, 3)
-            med.SetInputConnection(resampler.GetOutputPort())
-            # med.Update()
+            structureIm = sitk.SmoothingRecursiveGaussian(resIm, 3)
+            structureIm = sitk.BinaryThreshold(structureIm, 110, imageHighestIntensity, 20, 0)
+            structureIm = sitk.Cast(structureIm, sitk.sitkFloat32)
 
-            thresh = vtk.vtkImageThreshold()
-            thresh.ThresholdByUpper(110)
-            thresh.SetOutputScalarTypeToFloat()
-            thresh.SetOutValue(0)
-            thresh.SetInValue(25)
-            thresh.ReplaceInOn()
-            thresh.ReplaceOutOn()
-            thresh.SetInputConnection(med.GetOutputPort())
-            # thresh.Update()
+            structureIm = (distance + structureIm) * mask
 
-            mathAdd = vtk.vtkImageMathematics()
-            mathAdd.SetOperationToAdd()
-            mathAdd.SetInputConnection(0, invSquare.GetOutputPort())
-            mathAdd.SetInputConnection(1, thresh.GetOutputPort())
-            # mathAdd.Update()
+            resampledIms[i] = resIm
+            structureIms[i] = structureIm
 
-            # Only keep region with data
-            mult = vtk.vtkImageMathematics()
-            mult.SetOperationToMultiply()
-            mult.SetInputConnection(0, dilateErode.GetOutputPort())
-            mult.SetInputConnection(1, mathAdd.GetOutputPort())
-            # mult.Update()
+            refImage = refImage + (resIm * structureIm)
+            alphaSumIm = alphaSumIm + structureIm
 
-            # Append mask to image as alpha component
-            app = vtk.vtkImageAppendComponents()
-            app.AddInputConnection(resampler.GetOutputPort())
-            app.AddInputConnection(mult.GetOutputPort())
-            app.Update()
+        refImage = refImage / alphaSumIm
 
-            im = vtk.vtkImageData()
-            im.DeepCopy(app.GetOutput())
+        refImage = sitk.Cast(sitk.RescaleIntensity(refImage, 0, 255), sitk.sitkUInt8)
 
-            gc.collect()
+        return refImage
 
-            blend.AddInputData(im)
+    def generateMask(self, image, erosionRadius=3):
+        """
+        Generates a mask using 1-max threshold to identify only areas with information from ultrasound volumes
+        :param image: SimpleITK image
+        :return: binary mask as SimpleITK image
+        """
+        minmax = sitk.MinimumMaximumImageFilter()
+        minmax.Execute(image)
+        imageHighestIntensity = minmax.GetMaximum()
+        imageLowestIntensity = minmax.GetMinimum()
 
-        # Set output volume
-        blend.Update()
+        thresh = sitk.BinaryThresholdImageFilter()
+        thresh.SetLowerThreshold(1)
+        thresh.SetUpperThreshold(imageHighestIntensity)
+        mask = thresh.Execute(image)
 
-        # Extract first component to get image and cast to uchar
-        extract = vtk.vtkImageExtractComponents()
-        extract.SetComponents(0)
-        extract.SetInputConnection(blend.GetOutputPort())
-        # extract.Update()
+        if erosionRadius:
+            dist = sitk.SignedMaurerDistanceMap(mask, True, False, True)
+            mask = sitk.BinaryThreshold(dist, erosionRadius, 1e6)
 
-        cast = vtk.vtkImageCast()
-        cast.SetOutputScalarTypeToUnsignedChar()
-        cast.SetInputConnection(extract.GetOutputPort())
-        cast.Update()
+        return mask
 
-        outImage = vtk.vtkImageData()
-        outImage.DeepCopy(cast.GetOutput())
-        out.SetAndObserveImageData(outImage)
+    def getBounds(self, sitkImage, transform=None, inv=False, masked=False):
+        """
+        Gets the bounds of an image in LPS space (SimpleITK space). Takes optional transform.
+        :param sitkImage: The input image
+        :param tr: Optional transform
+        :param inv: Invert transform?
+        :param masked: Masked image to include only area with data?
+        :return: bounds in form [minX, maxX, minY, maxY, minZ, maxZ]
+        """
 
-    def getElastixRigidFromDisplacementGrid(self, gridTransformNode, outputNode):
-
-        gridTransform = gridTransformNode.GetTransformFromParentAs('vtkOrientedGridTransform')
-        if not gridTransform:
-            # Not stored as a displacement grid from parent
-            return
-
-        # Get center and dimensions of displacement grid
-        center = np.zeros(3)
-        bounds = np.zeros(6)
-
-        displacementGrid = gridTransform.GetDisplacementGrid()
-        displacementGrid.GetCenter(center)
-        displacementGrid.GetBounds(bounds)
-
-        dims = np.zeros(3)
-        for i in range(3):
-            dims[i] = (bounds[i * 2 + 1] - bounds[i * 2]);
-
-        # Create sample points in grid
-        pointSrc = vtk.vtkPointSource()
-        pointSrc.SetCenter(center)
-        pointSrc.SetRadius(np.min((dims) / 2))
-        pointSrc.SetNumberOfPoints(200)
-        pointSrc.Update()
-
-        # Transform a copy of points using displacement grid
-        toPoints = pointSrc.GetOutput().GetPoints()
-        fromPointsGrid = vtk.vtkPoints()
-
-        gridTransform.TransformPoints(toPoints, fromPointsGrid)
-
-        # Find corresponding rigid transform between point sets
-        landmark = vtk.vtkLandmarkTransform()
-        landmark.SetModeToRigidBody()
-        landmark.SetSourceLandmarks(fromPointsGrid)
-        landmark.SetTargetLandmarks(toPoints)
-        landmark.Update()
-
-        error = 0
-        fromPointsRigid = vtk.vtkPoints()
-        landmark.TransformPoints(fromPointsGrid, fromPointsRigid)
-        for i in range(toPoints.GetNumberOfPoints()):
-            toPoint = np.zeros(3)
-            fromPoint = np.zeros(3)
-            toPoints.GetPoint(i, toPoint)
-            fromPointsRigid.GetPoint(i, fromPoint)
-
-            error += np.linalg.norm(toPoint - fromPoint) ** 2
-
-        error = np.sqrt(error / toPoints.GetNumberOfPoints())
-
-        linTransform = vtk.vtkTransform()
-        linTransform.Identity()
-        if error > 0.5:
-            logging.debug("Cannot compute rigid transform from given displacement field")
+        if transform:
+            tr = transform
         else:
-            linTransform.SetMatrix(landmark.GetMatrix())
+            tr = sitk.Transform()
 
-        outputNode.SetAndObserveTransformToParent(linTransform)
+        if inv:
+            invTr = None
+            try:
+                invTr = tr.GetInverse()
+            except RuntimeError:
+                pass
 
-    def generateMask(self, refVolumeNode):
+            if not invTr:
+                # Create displacement field from transform
 
-        segmentationNode = slicer.mrmlScene.AddNewNodeByClass('vtkMRMLSegmentationNode', 'VolumeMask')
-        segmentationNode.GetSegmentation().AddEmptySegment('VolumeMask')
+                # Use sparse displacement field as we only need approximate bounds
+                outDirection = sitkImage.GetDirection()
 
-        # Create segment editor to get access to effects
-        segmentEditorWidget = slicer.qMRMLSegmentEditorWidget()
-        segmentEditorWidget.setMRMLScene(slicer.mrmlScene)
-        segmentEditorNode = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLSegmentEditorNode")
-        segmentEditorNode.SetOverwriteMode(segmentEditorNode.OverwriteNone)
-        segmentEditorWidget.setMRMLSegmentEditorNode(segmentEditorNode)
-        segmentEditorWidget.setSegmentationNode(segmentationNode)
-        segmentEditorWidget.setMasterVolumeNode(refVolumeNode)
-        segmentEditorWidget.setCurrentSegmentID('VolumeMask')
+                dir3 = np.array([outDirection[0], outDirection[4], outDirection[8]])
+                outSpacing = [2, 2, 2]
+                sizePhys = np.array(sitkImage.GetSize()) * sitkImage.GetSpacing()
 
-        # Threshold to get a mask of the ultrasound cone
-        segmentEditorWidget.setActiveEffectByName("Threshold")
-        effect = segmentEditorWidget.activeEffect()
-        masterImageData = effect.masterVolumeImageData()
-        lo, hi = masterImageData.GetScalarRange()
-        effect.setParameter("MinimumThreshold", 1)
-        effect.setParameter("MaximumThreshold", hi)
-        effect.self().onApply()
+                outOrigin = [outDirection[i] - 0.5 * sizePhys[i] * dir3[i] for i in range(3)]
+                outSize = np.ceil((sizePhys / np.array(outSpacing)) * 2).astype('uint32').tolist()
 
-        # Margin Shrink to exclude borders
-        segmentEditorWidget.setActiveEffectByName("Margin")
-        effect = segmentEditorWidget.activeEffect()
-        effect.setParameter("MarginSizeMm", -6)
-        effect.self().onApply()
+                disFieldFilter = sitk.TransformToDisplacementFieldFilter()
+                disFieldFilter.SetOutputDirection(outDirection)
+                disFieldFilter.SetOutputOrigin(outOrigin)
+                disFieldFilter.SetOutputSpacing(outSpacing)
+                disFieldFilter.SetSize(outSize)
+                dspf = disFieldFilter.Execute(tr)
 
-        # Create label map node to store mask
-        labelNode = slicer.util.getFirstNodeByClassByName('vtkMRMLLabelMapVolumeNode',
-                                                          refVolumeNode.GetName() + '-label')
-        if not labelNode:
-            labelNode = slicer.mrmlScene.AddNewNodeByClass('vtkMRMLLabelMapVolumeNode',
-                                                           refVolumeNode.GetName() + '-label')
-        labelNode.SetAndObserveTransformNodeID(refVolumeNode.GetTransformNodeID())
+                invTr = sitk.DisplacementFieldTransform(sitk.InvertDisplacementField(dspf))
 
-        segmentationIds = vtk.vtkStringArray()
-        segmentationIds.InsertNextValue('VolumeMask')
-        slicer.modules.segmentations.logic().ExportSegmentsToLabelmapNode(segmentationNode, segmentationIds,
-                                                                          labelNode, refVolumeNode)
-        # Clean up
-        segmentEditorWidget = None
-        slicer.mrmlScene.RemoveNode(segmentEditorNode)
-        slicer.mrmlScene.RemoveNode(segmentationNode)
+            oldTr = tr
+            tr = invTr
 
-        return labelNode
+        if masked:
+            mask = self.generateMask(sitkImage, 0)
+
+            stats = sitk.LabelStatisticsImageFilter()
+            stats.Execute(sitkImage, mask)
+
+            boundsIJK = stats.GetBoundingBox(1)
+            corners = [
+                tr.TransformPoint(sitkImage.TransformIndexToPhysicalPoint([boundsIJK[0], boundsIJK[2], boundsIJK[4]])),
+                tr.TransformPoint(sitkImage.TransformIndexToPhysicalPoint([boundsIJK[0], boundsIJK[2], boundsIJK[5]])),
+                tr.TransformPoint(sitkImage.TransformIndexToPhysicalPoint([boundsIJK[0], boundsIJK[3], boundsIJK[4]])),
+                tr.TransformPoint(sitkImage.TransformIndexToPhysicalPoint([boundsIJK[0], boundsIJK[3], boundsIJK[5]])),
+                tr.TransformPoint(sitkImage.TransformIndexToPhysicalPoint([boundsIJK[1], boundsIJK[2], boundsIJK[4]])),
+                tr.TransformPoint(sitkImage.TransformIndexToPhysicalPoint([boundsIJK[1], boundsIJK[2], boundsIJK[5]])),
+                tr.TransformPoint(sitkImage.TransformIndexToPhysicalPoint([boundsIJK[1], boundsIJK[3], boundsIJK[4]])),
+                tr.TransformPoint(sitkImage.TransformIndexToPhysicalPoint([boundsIJK[1], boundsIJK[3], boundsIJK[5]]))
+            ]
+        else:
+            dims = (np.array(sitkImage.GetSize()) - 1).tolist()
+
+            # New bounds can be computed from transformed corners
+            corners = [tr.TransformPoint(sitkImage.TransformIndexToPhysicalPoint([0, 0, 0])),
+                       tr.TransformPoint(sitkImage.TransformIndexToPhysicalPoint([0, 0, dims[2]])),
+                       tr.TransformPoint(sitkImage.TransformIndexToPhysicalPoint([0, dims[1], dims[2]])),
+                       tr.TransformPoint(sitkImage.TransformIndexToPhysicalPoint([dims[0], 0, dims[2]])),
+                       tr.TransformPoint(sitkImage.TransformIndexToPhysicalPoint([dims[0], dims[1], dims[2]])),
+                       tr.TransformPoint(sitkImage.TransformIndexToPhysicalPoint([0, dims[1], 0])),
+                       tr.TransformPoint(sitkImage.TransformIndexToPhysicalPoint([dims[0], 0, 0])),
+                       tr.TransformPoint(sitkImage.TransformIndexToPhysicalPoint([dims[0], dims[1], 0]))]
+
+        min = np.min(corners, 0)
+        max = np.max(corners, 0)
+
+        bounds = [min[0], max[0],
+                  min[1], max[1],
+                  min[2], max[2]]
+
+        return bounds
 
     def processLog(self, text):
         slicer.app.processEvents()
+
+    def getResampledImage(self, sitkImage, tr=None, refImage=None, interpolator=sitk.sitkLinear):
+        """
+        Resamples an image with a given transform to its new location. Takes option spacing and interpolator parameters.
+        Transform should be defined as transformation from final->initial.
+        :param sitkImage: The image to resample
+        :param tr: The transform to use for resampling
+        :param spacing: Desired output spacing. Needs to be same length as image dimensions.
+        :param interpolator: Resample interpolator to use
+        :return: New SimpleITK Image resampled
+        """
+
+        if not tr:
+            tr = sitk.Transform()
+
+        resample = sitk.ResampleImageFilter()
+
+        if not refImage:
+            bounds = self.getBounds(sitkImage, tr, True)
+
+            outOrigin = [bounds[1], bounds[3], bounds[4]]
+            outDirections = [-1.0, 0.0, 0.0, 0.0, -1.0, 0.0, 0.0, 0.0, 1.0]
+            outSpacing = sitkImage.GetSpacing()
+            outSize = [0, 0, 0]
+            for i in range(3):
+                outSize[i] = int(np.ceil((bounds[i * 2 + 1] - bounds[i * 2]) / outSpacing[i]))
+
+            resample.SetOutputOrigin(outOrigin)
+            resample.SetOutputDirection(outDirections)
+            resample.SetOutputSpacing(outSpacing)
+            resample.SetSize(outSize)
+        else:
+            resample.SetReferenceImage(refImage)
+
+        resample.SetTransform(tr)
+        resample.SetInterpolator(interpolator)
+        resample.SetOutputPixelType(sitkImage.GetPixelID())
+
+        return resample.Execute(sitkImage)
+
+
+
+
 
 
 class CardiacVolumeStitchingTest(ScriptedLoadableModuleTest):

@@ -1,4 +1,5 @@
-// Description: affine, MI, ASGD
+// Description: Euler, NCC, ASGD
+// Designed for semi-simultaneous registration of cardiac US images
 
 //ImageTypes
 (FixedInternalImagePixelType "float")
@@ -11,27 +12,26 @@
 (FixedImagePyramid "FixedSmoothingImagePyramid")
 (MovingImagePyramid "MovingSmoothingImagePyramid")
 (Interpolator "LinearInterpolator")
-(Metric "NormalizedMutualInformation")
+(Metric "AdvancedNormalizedCorrelation")
 (Optimizer "AdaptiveStochasticGradientDescent")
-(ResampleInterpolator "FinalBSplineInterpolator")
+(ResampleInterpolator "FinalLinearInterpolator")
 (Resampler "DefaultResampler")
 (Transform "EulerTransform")
 
-(ErodeMask "true" )
+(ErodeMask "false" )
 
 (NumberOfResolutions 4)
 
 (HowToCombineTransforms "Compose")
 (AutomaticScalesEstimation "true")
-(AutomaticTransformInitialization "true")
-
+(AutomaticTransformInitialization "false")
 
 (WriteTransformParametersEachIteration "false")
 (WriteResultImageAfterEachResolution "false") 
 (ShowExactMetricValue "false")
 
 //Maximum number of iterations in each resolution level:
-(MaximumNumberOfIterations 1000 ) 
+(MaximumNumberOfIterations 200 150 100 75 )
 
 //Number of grey level bins in each resolution level:
 (NumberOfHistogramBins 32 )
@@ -39,14 +39,13 @@
 //Number of spatial samples used to compute the mutual information in each resolution level:
 (ImageSampler "RandomCoordinate")
 (UseRandomSampleRegion "false")
-(NumberOfSpatialSamples 4000 )
+(NumberOfSpatialSamples 5000 )
+(NumberOfSamplesForExactGradient 10000)
 (NewSamplesEveryIteration "true")
 (CheckNumberOfSamples "true")
 (MaximumNumberOfSamplingAttempts 10)
-(RequiredRatioOfValidSamples 0.05)
+(RequiredRatioOfValidSamples 0.01)
 
-//Order of B-Spline interpolation used for applying the final deformation:
-(FinalBSplineInterpolationOrder 3)
 
 //Default pixel value for pixels that come from outside the picture:
 (DefaultPixelValue 0)
