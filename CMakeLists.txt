@@ -20,6 +20,7 @@ include(${Slicer_USE_FILE})
 #-----------------------------------------------------------------------------
 # Extension modules
 add_subdirectory(CardiacVolumeStitching)
+add_subdirectory(MonogenicFilter)
 ## NEXT_MODULE
 
 #-----------------------------------------------------------------------------
