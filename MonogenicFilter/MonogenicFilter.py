@@ -140,12 +140,12 @@ class MonogenicFilterLogic(ScriptedLoadableModuleLogic):
         im = sitkUtils.PullVolumeFromSlicer(inputVolume)
         im2 = sitk.SmoothingRecursiveGaussian(im, 1.0)
 
-        volume = sitk.GetArrayFromImage(im)
+        volume = sitk.GetArrayFromImage(im2)
 
         # volume = slicer.util.arrayFromVolume(inputVolume)
         volume = volume.transpose([2,1,0])
 
-        filters = MonogenicSignal.MonogenicFilters(*volume.shape, 8*1.8 ** np.arange(5), 8*1.8 ** np.arange(5))
+        filters = MonogenicSignal.MonogenicFilters(volume.shape, im.GetSpacing(), [6, 12, 24, 32])
         monogenic = filters.getMonogenicSignal(volume)
 
         _, _, _, outvolume = monogenic.orientedSymmetry()
