@@ -2,7 +2,7 @@ import numpy as np
 
 class MonogenicFilters:
 
-    def __init__(self, xsize, ysize, zsize, wl_xy, wl_z):
+    def __init__(self, size, spacing, wl_xy):
         """
         Creates a set of frequency domain filters combining bandpass and Reisz
         filters for use in calculating the monogenic signal.
@@ -17,11 +17,9 @@ class MonogenicFilters:
         sigmaOnf = 0.5
         ratio = 0.98
 
-        assert np.shape(wl_xy) == np.shape(wl_z)
-
-        self.xsize = xsize
-        self.ysize = ysize
-        self.zsize = zsize
+        self.xsize = size[0]
+        self.ysize = size[1]
+        self.zsize = size[2]
 
         self.numFilt = np.shape(wl_xy)[0]
 
@@ -59,18 +57,20 @@ class MonogenicFilters:
         yGrid = yGrid / self.ysize
         zGrid = zGrid / self.zsize
 
-        self.bpFilt = np.zeros((self.xsize, self.ysize, self.zsize, self.numFilt))
+        xGrid2 = xGrid ** 2
+        yGrid2 = yGrid ** 2
+        zGrid2 = zGrid ** 2
+
+        self.bpFilt = np.zeros((self.xsize, self.ysize, self.zsize, self.numFilt), 'float32')
 
         for i in range(self.numFilt):
             # Construct the filter -  first calculate the radial filter component
             f0 = 1.0 / wl_xy[i]  # Centre frequency of spatial filter.
             w0 = f0  # Normalised radius from centre of frequency plane corresponding to f0
 
-            g0 = 1.0 / wl_z[i]  # Centre frequency of temporal filter.
-            u0 = g0 / 0.5  # Normalised radius from centre of frequency plane corresponding to f0
-
             # Determine the spatial regions to use
-            w = np.sqrt((xGrid ** 2) / (w0 ** 2) + (yGrid ** 2) / (w0 ** 2) + (zGrid ** 2) / (u0 ** 2))
+            w = np.sqrt((xGrid2) / ((w0 / spacing[0]) ** 2) + (yGrid2) / ((w0 / spacing[1]) ** 2) + (zGrid2) / (
+                        (w0 / spacing[2]) ** 2))
             w[0, 0, 0] = 1  # Avoids division by zero
 
             # Computation of 3D log-gabor filter across the volumetric range
@@ -92,7 +92,7 @@ class MonogenicFilters:
         self.bpFilt = self.bpFilt / np.max(sumFilt[:])
 
         # Generate the Riesz filter components (i.e. the odd filter whose components are imaginary)
-        w = np.sqrt(yGrid ** 2 + xGrid ** 2 + zGrid ** 2)
+        w = np.sqrt(yGrid2 + xGrid2 + zGrid2)
         w[0, 0, 0] = 1
         self.ReiszFilt03 = 1 - (zGrid / w)
         self.ReiszFilt12 = (1j * xGrid - yGrid) / w
@@ -106,10 +106,10 @@ class MonogenicFilters:
             self.shape = (*volume.shape, monogenic_filter.numFilt)
 
             # Create output arrays
-            self.Fm1 = np.zeros(self.shape)
-            self.Fm2 = np.zeros(self.shape)
-            self.Fm3 = np.zeros(self.shape)
-            self.Fm4 = np.zeros(self.shape)
+            self.Fm1 = np.zeros(self.shape, 'float32')
+            self.Fm2 = np.zeros(self.shape, 'float32')
+            self.Fm3 = np.zeros(self.shape, 'float32')
+            self.Fm4 = np.zeros(self.shape, 'float32')
 
             # Compute the 3-dimensional fast Fourier transform of the original image
             F = np.fft.fftn(volume)
@@ -207,8 +207,9 @@ class MonogenicFilters:
 
 
 if __name__ == "__main__":
-    shape = (224,144,208)
-    filt = MonogenicFilters(*shape, [10, 20, 30, 40], [10, 20, 30, 40])
+    shape = (400,400,400)
+    spacing = [1,1,1]
+    filt = MonogenicFilters(shape, spacing, [10, 20, 30, 40, 50])
     mono = filt.getMonogenicSignal(np.zeros(shape))
     mono.featureSymmetry()
     mono.localEnergy()
