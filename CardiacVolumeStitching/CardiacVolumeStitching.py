@@ -10,8 +10,8 @@ from six.moves import range
 import SimpleITK as sitk
 import sitkUtils
 import SimpleElastix
+from MonogenicSignal import MonogenicSignal
 from timeit import default_timer as timer
-
 
 #
 # CardiacVolumeStitching
@@ -516,7 +516,8 @@ class CardiacVolumeStitchingLogic(ScriptedLoadableModuleLogic):
 
         selx.LogToConsoleOn()
         selx.LogToFileOff()
-        selx.SetOutputDirectory('')
+        selx.RemoveOutputDirectory()
+        selx.RemoveLogFileName()
 
         resultImage = selx.Execute()
 
@@ -562,7 +563,7 @@ class CardiacVolumeStitchingLogic(ScriptedLoadableModuleLogic):
         # Get bounds of final volume
         bounds = np.zeros((len(volumeList), 6))
         for i, im in enumerate(volumeList):
-            bounds[i, :] = self.getBounds(im, transforms[i], True)
+            bounds[i, :] = self.getBounds(im, transforms[i], True, True)
 
         min = bounds.min(0)
         max = bounds.max(0)
@@ -578,31 +579,54 @@ class CardiacVolumeStitchingLogic(ScriptedLoadableModuleLogic):
 
         roiDim = np.ceil(roiDim).astype('uint16')
 
-        # Crete reference image for resampling
+        print("Output size: ({},{},{})".format(*roiDim))
+
+        # Create reference image for resampling
         refImage = sitk.Image(*roiDim.tolist(), sitk.sitkFloat32)
         refImage.SetOrigin([volumeBounds_ROI[1], volumeBounds_ROI[3], volumeBounds_ROI[4]])
         refImage.SetSpacing([outputSpacing] * 3)
         refImage.SetDirection([-1.0, 0.0, 0.0, 0.0, -1.0, 0.0, 0.0, 0.0, 1.0])
 
-        resampledIms = [None] * len(volumeList)
-        structureIms = [None] * len(volumeList)
-
         alphaSumIm = sitk.Image(refImage)
+
+        filtDim = sitk.FFTPad(sitk.BinShrink(refImage, [2,2,2])).GetSize()
+
+        filters = MonogenicSignal.MonogenicFilters(filtDim, [outputSpacing * 2] * 3, [6, 12, 24, 32])
 
         # for each volume, resample into output space
         for i, im in enumerate(volumeList):
             start = timer()
+
+            # Resample the image to the output space
             resIm = self.getResampledImage(sitk.Cast(im, sitk.sitkFloat32), transforms[i], refImage, sitk.sitkLinear)
 
             end = timer()
             print("resample: {}".format(end - start))
 
             start = timer()
+            # Get the mask covering the region with actual data
             mask = self.generateMask(resIm, 2)
-            # mask = self.getResampledImage(mask, transforms[i], refImage, sitk.sitkNearestNeighbor)
             mask = sitk.Cast(mask, sitk.sitkFloat32)
             end = timer()
             print("generate mask: {}".format(end - start))
+
+            # Get the oriented symmetry map for this volume
+            gauss = sitk.SmoothingRecursiveGaussian(resIm, 1.0)
+            shrink = sitk.FFTPad(sitk.BinShrink(resIm, [2,2,2]))
+            volume = sitk.GetArrayFromImage(shrink)
+
+            start = timer()
+            mono = filters.getMonogenicSignal(np.swapaxes(volume, 0, 2))
+            end = timer()
+            print("compute monogenic signal: {}".format(end - start))
+
+            start = timer()
+            orientedSym = sitk.GetImageFromArray(np.swapaxes(mono.orientedSymmetry()[3], 0, 2))
+            orientedSym.CopyInformation(shrink)
+            end = timer()
+            print("compute oriented symmetry: {}".format(end - start))
+
+            orientedSym = self.getResampledImage(orientedSym, sitk.Transform(), refImage, sitk.sitkLinear)
 
             # Get probe position for volume in IJK space
             probeOriginLPS = [(bounds[i, j * 2] + bounds[i, j * 2 + 1]) / 2 for j in range(3)]
@@ -610,30 +634,23 @@ class CardiacVolumeStitchingLogic(ScriptedLoadableModuleLogic):
 
             probeOriginIJK = resIm.TransformPhysicalPointToIndex(probeOriginLPS)
 
-            distanceSource = sitk.Image(refImage)
-            distanceSource.MakeUnique()
+            distanceSource = sitk.Image(refImage.GetSize(), refImage.GetPixelIDValue())
+            distanceSource.CopyInformation(refImage)
             distanceSource[probeOriginIJK] = 1
 
             distance = sitk.SignedMaurerDistanceMap(sitk.Cast(distanceSource, sitk.sitkUInt8),
                                                     squaredDistance=False, useImageSpacing=True)
             distance = sitk.Cast(distance, sitk.sitkFloat32)
+            distance = sitk.InvertIntensity(sitk.RescaleIntensity(distance, 0, 10), 10)
+            distance = sitk.RescaleIntensity(distance ** 3, 1, 25)
 
-            minmax = sitk.MinimumMaximumImageFilter()
-            minmax.Execute(distance)
-            imageHighestIntensity = minmax.GetMaximum()
-            imageLowestIntensity = minmax.GetMinimum()
+            structureIm = sitk.Cast(sitk.IntensityWindowing(orientedSym, -1, 0, -10, 0) +
+                                    sitk.IntensityWindowing(orientedSym, 0, 1, 0, 25), sitk.sitkFloat32)
 
-            distance = ((imageHighestIntensity - distance) * (4.0 / imageHighestIntensity)) ** 4
+            structureIm = sitk.IntensityWindowing((distance + structureIm), 1, 40, 0.05, 5) * mask
+            # sitkUtils.PushVolumeToSlicer(structureIm)
 
-            # Blur and threshold to identify structures
-            structureIm = sitk.SmoothingRecursiveGaussian(resIm, 3)
-            structureIm = sitk.BinaryThreshold(structureIm, 110, imageHighestIntensity, 20, 0)
-            structureIm = sitk.Cast(structureIm, sitk.sitkFloat32)
-
-            structureIm = (distance + structureIm) * mask
-
-            resampledIms[i] = resIm
-            structureIms[i] = structureIm
+            # TODO Balance power of distance vs structure to enhance image quality
 
             refImage = refImage + (resIm * structureIm)
             alphaSumIm = alphaSumIm + structureIm
@@ -695,11 +712,12 @@ class CardiacVolumeStitchingLogic(ScriptedLoadableModuleLogic):
                 outDirection = sitkImage.GetDirection()
 
                 dir3 = np.array([outDirection[0], outDirection[4], outDirection[8]])
-                outSpacing = [2, 2, 2]
+                outSpacing = [10,10,10]
                 sizePhys = np.array(sitkImage.GetSize()) * sitkImage.GetSpacing()
 
-                outOrigin = [outDirection[i] - 0.5 * sizePhys[i] * dir3[i] for i in range(3)]
-                outSize = np.ceil((sizePhys / np.array(outSpacing)) * 2).astype('uint32').tolist()
+                outOrigin = sitkImage.GetOrigin()
+                outOrigin = [outOrigin[i] - 2 * sizePhys[i] * dir3[i] for i in range(3)]
+                outSize = np.ceil((sizePhys / np.array(outSpacing)) * 5).astype('uint32').tolist()
 
                 disFieldFilter = sitk.TransformToDisplacementFieldFilter()
                 disFieldFilter.SetOutputDirection(outDirection)
@@ -716,25 +734,20 @@ class CardiacVolumeStitchingLogic(ScriptedLoadableModuleLogic):
         if masked:
             mask = self.generateMask(sitkImage, 0)
 
-            stats = sitk.LabelStatisticsImageFilter()
-            stats.Execute(sitkImage, mask)
+            edges = sitk.ZeroCrossing(sitk.Cast(mask, sitk.sitkFloat32))
+            points = sitk.GetArrayFromImage(edges).swapaxes(0, 2)
 
-            boundsIJK = stats.GetBoundingBox(1)
-            corners = [
-                tr.TransformPoint(sitkImage.TransformIndexToPhysicalPoint([boundsIJK[0], boundsIJK[2], boundsIJK[4]])),
-                tr.TransformPoint(sitkImage.TransformIndexToPhysicalPoint([boundsIJK[0], boundsIJK[2], boundsIJK[5]])),
-                tr.TransformPoint(sitkImage.TransformIndexToPhysicalPoint([boundsIJK[0], boundsIJK[3], boundsIJK[4]])),
-                tr.TransformPoint(sitkImage.TransformIndexToPhysicalPoint([boundsIJK[0], boundsIJK[3], boundsIJK[5]])),
-                tr.TransformPoint(sitkImage.TransformIndexToPhysicalPoint([boundsIJK[1], boundsIJK[2], boundsIJK[4]])),
-                tr.TransformPoint(sitkImage.TransformIndexToPhysicalPoint([boundsIJK[1], boundsIJK[2], boundsIJK[5]])),
-                tr.TransformPoint(sitkImage.TransformIndexToPhysicalPoint([boundsIJK[1], boundsIJK[3], boundsIJK[4]])),
-                tr.TransformPoint(sitkImage.TransformIndexToPhysicalPoint([boundsIJK[1], boundsIJK[3], boundsIJK[5]]))
-            ]
+            points = np.column_stack(np.where(points == 1))
+
+            trPoints = np.zeros(points.shape)
+            for i, row in enumerate(points[::3,:]):
+                trPoints[i,:] = tr.TransformPoint(sitkImage.TransformIndexToPhysicalPoint(row.tolist()))
+
         else:
             dims = (np.array(sitkImage.GetSize()) - 1).tolist()
 
             # New bounds can be computed from transformed corners
-            corners = [tr.TransformPoint(sitkImage.TransformIndexToPhysicalPoint([0, 0, 0])),
+            trPoints = [tr.TransformPoint(sitkImage.TransformIndexToPhysicalPoint([0, 0, 0])),
                        tr.TransformPoint(sitkImage.TransformIndexToPhysicalPoint([0, 0, dims[2]])),
                        tr.TransformPoint(sitkImage.TransformIndexToPhysicalPoint([0, dims[1], dims[2]])),
                        tr.TransformPoint(sitkImage.TransformIndexToPhysicalPoint([dims[0], 0, dims[2]])),
@@ -743,8 +756,8 @@ class CardiacVolumeStitchingLogic(ScriptedLoadableModuleLogic):
                        tr.TransformPoint(sitkImage.TransformIndexToPhysicalPoint([dims[0], 0, 0])),
                        tr.TransformPoint(sitkImage.TransformIndexToPhysicalPoint([dims[0], dims[1], 0]))]
 
-        min = np.min(corners, 0)
-        max = np.max(corners, 0)
+        min = np.min(trPoints, 0)
+        max = np.max(trPoints, 0)
 
         bounds = [min[0], max[0],
                   min[1], max[1],
