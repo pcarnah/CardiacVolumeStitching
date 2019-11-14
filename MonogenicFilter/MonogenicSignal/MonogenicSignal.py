@@ -61,7 +61,7 @@ class MonogenicFilters:
         yGrid2 = yGrid ** 2
         zGrid2 = zGrid ** 2
 
-        self.bpFilt = np.zeros((self.xsize, self.ysize, self.zsize, self.numFilt), 'float32')
+        self.bpFilt = np.zeros((*xGrid.shape, self.numFilt), 'float32')
 
         for i in range(self.numFilt):
             # Construct the filter -  first calculate the radial filter component
@@ -84,8 +84,8 @@ class MonogenicFilters:
                 self.bpFilt[self.xsize // 2 + 1, :, 1, i] = 0
             if self.ysize % 2 == 0:
                 self.bpFilt[:, self.ysize // 2 + 1, 1, i] = 0
-            if self.zsize % 2 == 0:
-                self.bpFilt[:, :, self.zsize // 2 + 1, i] = 0
+            # if self.zsize % 2 == 0:
+            #     self.bpFilt[:, :, self.zsize // 2 + 1, i] = 0
 
         # Normalise by the maximum value of the sum of all filters
         sumFilt = np.sum(self.bpFilt, 3)
@@ -210,13 +210,14 @@ if __name__ == "__main__":
     shape = (400,400,400)
     spacing = [1,1,1]
     filt = MonogenicFilters(shape, spacing, [10, 20, 30, 40, 50])
-    mono = filt.getMonogenicSignal(np.zeros(shape))
-    mono.featureSymmetry()
-    mono.localEnergy()
-    mono.localOrientation()
-    mono.localPhase()
-    _,_,_,FS = mono.orientedSymmetry()
+    mono = filt.getMonogenicSignal(np.ones(shape))
+    # mono.featureSymmetry()
+    # mono.localEnergy()
+    # mono.localOrientation()
+    # mono.localPhase()
+    # _,_,_,FS = mono.orientedSymmetry()
 
-    print(filt.bpFilt[0:10, 1, 1, 1])
-    print(filt.ReiszFilt03[0:10, 1, 1])
-    print(filt.ReiszFilt12[0:10, 1, 1])
+    print(mono.Fm1[0:10, 1, 1, 1])
+    print(mono.Fm2[0:10, 1, 1])
+    print(mono.Fm3[0:10, 1, 1])
+    print(mono.Fm4[0:10, 1, 1])

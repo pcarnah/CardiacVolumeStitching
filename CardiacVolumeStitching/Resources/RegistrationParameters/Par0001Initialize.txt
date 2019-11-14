@@ -18,34 +18,35 @@
 (Resampler "DefaultResampler")
 (Transform "EulerTransform")
 
-(ErodeMask "false" )
+(ErodeMask "true" )
 
-(NumberOfResolutions 4)
+(NumberOfResolutions 1)
+(ImagePyramidSchedule 2 2 2)
 
 (HowToCombineTransforms "Compose")
 (AutomaticScalesEstimation "true")
-(AutomaticTransformInitialization "false")
+(AutomaticTransformInitialization "true")
+(AutomaticTransformInitializationMethod "GeometricalCenter")
 
 (WriteTransformParametersEachIteration "false")
-(WriteResultImageAfterEachResolution "false") 
+(WriteResultImageAfterEachResolution "false")
 (ShowExactMetricValue "false")
 
 //Maximum number of iterations in each resolution level:
-(MaximumNumberOfIterations 200 150 100 75 )
+(MaximumNumberOfIterations 1 )
 
 //Number of grey level bins in each resolution level:
 (NumberOfHistogramBins 32 )
 
 //Number of spatial samples used to compute the mutual information in each resolution level:
-(ImageSampler "Random")
+(ImageSampler "RandomCoordinate")
 (UseRandomSampleRegion "false")
-(NumberOfSpatialSamples 5000 )
-(NumberOfSamplesForExactGradient 50000)
-(NumberOfJacobianMeasurements 10000)
+(NumberOfSpatialSamples 2000 )
+(NumberOfSamplesForExactGradient 25000)
 (NewSamplesEveryIteration "true")
-(CheckNumberOfSamples "true")
-(MaximumNumberOfSamplingAttempts 3)
-(RequiredRatioOfValidSamples 0.001)
+(CheckNumberOfSamples "false")
+//(MaximumNumberOfSamplingAttempts 10)
+//(RequiredRatioOfValidSamples 0.05)
 
 
 //Default pixel value for pixels that come from outside the picture:

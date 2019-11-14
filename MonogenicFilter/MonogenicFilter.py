@@ -89,6 +89,38 @@ class MonogenicFilterWidget(ScriptedLoadableModuleWidget):
         parametersFormLayout.addRow("Output Volume: ", self.outputSelector)
 
         #
+        # Mode selector
+        #
+        modeHBox = qt.QHBoxLayout()
+
+        fsButton = qt.QRadioButton("Feature Symmetry")
+        fsButton.checked = True
+        leButton = qt.QRadioButton("Local Energy")
+        loButton = qt.QRadioButton("Local Orientation")
+        lpButton = qt.QRadioButton("Local Phase")
+        osButton = qt.QRadioButton("Oriented Symmetry")
+
+        self.modeSelector = qt.QButtonGroup()
+        self.modeSelector.addButton(fsButton)
+        self.modeSelector.setId(fsButton, MonogenicFilterLogic.FEATURE_SYMMETRY)
+        self.modeSelector.addButton(leButton)
+        self.modeSelector.setId(leButton, MonogenicFilterLogic.LOCAL_ENERGY)
+        self.modeSelector.addButton(loButton)
+        self.modeSelector.setId(loButton, MonogenicFilterLogic.LOCAL_ORIENTATION)
+        self.modeSelector.addButton(lpButton)
+        self.modeSelector.setId(lpButton, MonogenicFilterLogic.LOCAL_PHASE)
+        self.modeSelector.addButton(osButton)
+        self.modeSelector.setId(osButton, MonogenicFilterLogic.ORIENTED_SYMMETRY)
+
+        modeHBox.addWidget(fsButton)
+        modeHBox.addWidget(leButton)
+        modeHBox.addWidget(loButton)
+        modeHBox.addWidget(lpButton)
+        modeHBox.addWidget(osButton)
+
+        parametersFormLayout.addRow(modeHBox)
+
+        #
         # Apply Button
         #
         self.applyButton = qt.QPushButton("Apply")
@@ -115,7 +147,7 @@ class MonogenicFilterWidget(ScriptedLoadableModuleWidget):
 
     def onApplyButton(self):
         logic = MonogenicFilterLogic()
-        logic.run(self.inputSelector.currentNode(), self.outputSelector.currentNode())
+        logic.run(self.inputSelector.currentNode(), self.outputSelector.currentNode(), self.modeSelector.checkedId())
 
 
 #
@@ -132,7 +164,13 @@ class MonogenicFilterLogic(ScriptedLoadableModuleLogic):
     https://github.com/Slicer/Slicer/blob/master/Base/Python/slicer/ScriptedLoadableModule.py
     """
 
-    def run(self, inputVolume, outputVolume):
+    FEATURE_SYMMETRY = 0
+    LOCAL_ENERGY = 1
+    LOCAL_ORIENTATION = 2
+    LOCAL_PHASE = 3
+    ORIENTED_SYMMETRY = 4
+
+    def run(self, inputVolume, outputVolume, mode=FEATURE_SYMMETRY):
         """
         Run the actual algorithm
         """
@@ -148,12 +186,24 @@ class MonogenicFilterLogic(ScriptedLoadableModuleLogic):
         filters = MonogenicSignal.MonogenicFilters(volume.shape, im.GetSpacing(), [6, 12, 24, 32])
         monogenic = filters.getMonogenicSignal(volume)
 
-        _, _, _, outvolume = monogenic.orientedSymmetry()
+        if mode == MonogenicFilterLogic.FEATURE_SYMMETRY:
+            outVolume, _ = monogenic.featureSymmetry()
+        elif mode == MonogenicFilterLogic.LOCAL_ENERGY:
+            outVolume = monogenic.localEnergy()[:,:,:,2]
+        elif mode == MonogenicFilterLogic.LOCAL_ORIENTATION:
+            outVolume = monogenic.localOrientation()[:,:,:,2]
+        elif mode == MonogenicFilterLogic.LOCAL_PHASE:
+            outVolume = monogenic.localPhase()[:,:,:,2]
+        elif mode == MonogenicFilterLogic.ORIENTED_SYMMETRY:
+            _, _, _, outVolume = monogenic.orientedSymmetry()
+        else:
+            logging.warning("Invalid mode.")
+            return False
 
-        outvolume = outvolume.transpose([2, 1, 0])
+        outVolume = outVolume.transpose([2, 1, 0])
 
         outputVolume.CopyOrientation(inputVolume)
-        slicer.util.updateVolumeFromArray(outputVolume, outvolume)
+        slicer.util.updateVolumeFromArray(outputVolume, outVolume)
 
         return True
 

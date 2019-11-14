@@ -1,0 +1,64 @@
+// Description: affine, MI, ASGD
+
+//ImageTypes
+(FixedInternalImagePixelType "float")
+(FixedImageDimension 3)
+(MovingInternalImagePixelType "float")
+(MovingImageDimension 3)
+
+//Components
+(Registration "MultiMetricMultiResolutionRegistration")
+(FixedImagePyramid "FixedRecursiveImagePyramid")
+(MovingImagePyramid "MovingRecursiveImagePyramid")
+(Interpolator "BSplineInterpolator")
+(Metric "AdvancedMattesMutualInformation" "StatisticalShapePenalty")
+(Metric0Weight 0.8)
+(Metric1Weight 0.2)
+(Optimizer "Powell")
+(ResampleInterpolator "FinalBSplineInterpolator")
+(Resampler "DefaultResampler")
+(Transform "BSplineTransform")
+
+(ErodeMask "true" )
+
+(NumberOfResolutions 2)
+
+(HowToCombineTransforms "Compose")
+(AutomaticTransformInitialization "false")
+(AutomaticScalesEstimation "true")
+
+
+(WriteTransformParametersEachIteration "false")
+(WriteResultImageAfterEachResolution "false") 
+(ShowExactMetricValue "false")
+
+//Maximum number of iterations in each resolution level:
+(MaximumNumberOfIterations 100 )
+(ValueTolerance 0.0001 0.00001)
+(MaximumStepLength 2 1 )
+
+//Number of grey level bins in each resolution level:
+(NumberOfHistogramBins 32 )
+
+//Number of spatial samples used to compute the mutual information in each resolution level:
+(ImageSampler "RandomSparseMask")
+(UseRandomSampleRegion "false")
+(NumberOfSpatialSamples 3000 )
+(NewSamplesEveryIteration "false")
+(CheckNumberOfSamples "true")
+(MaximumNumberOfSamplingAttempts 10)
+(RequiredRatioOfValidSamples 0.05)
+
+//Order of B-Spline interpolation used in each resolution level:
+(BSplineInterpolationOrder 1)
+
+//Order of B-Spline interpolation used for applying the final deformation:
+(FinalBSplineInterpolationOrder 3)
+
+//Default pixel value for pixels that come from outside the picture:
+(DefaultPixelValue 0)
+
+(WriteResultImage "false")
+(ResultImagePixelType "short")
+(ResultImageFormat "mhd")
+
