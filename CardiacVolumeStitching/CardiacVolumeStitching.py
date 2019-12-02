@@ -60,11 +60,10 @@ class CardiacVolumeStitchingWidget(ScriptedLoadableModuleWidget):
 
         # To store list of input nodes (volume or sequence)
         self.inputVolumeList = []
+        self._logic = CardiacVolumeStitchingLogic()
 
     def setup(self):
         ScriptedLoadableModuleWidget.setup(self)
-
-        self._logic = CardiacVolumeStitchingLogic()
 
         # Instantiate and connect widgets ...
 
@@ -414,7 +413,7 @@ class CardiacVolumeStitchingLogic(ScriptedLoadableModuleLogic):
         registering each moving volume to all other volumes in turn, for a set number of cycles.
         :param volumeList: List of volumes to group-register
         :param fixedVolume: Index of fixed volume in list
-        :param initalsTrs: List of initial transforms
+        :param initialTrs: List of initial transforms
         :param numCycles: Number of cycles to run algorithm
         :param parMap: ParameterMap
         :return: List of transforms
@@ -546,6 +545,13 @@ class CardiacVolumeStitchingLogic(ScriptedLoadableModuleLogic):
         return resultImage, tr
 
     def initialAlignment(self, volumeList, fixedVolume=0, initialTrs=None):
+        """
+        Initialize the transforms to the fixed volume by geometrical center
+        :param volumeList: List of SimpleITK images
+        :param fixedVolume: Index of fixed volume
+        :param initialTrs: List of SimpleITK Transforms to apply before center alignment
+        :return:
+        """
 
         volumes = volumeList[0:fixedVolume] + volumeList[fixedVolume + 1:]
         fixed = volumeList[fixedVolume]
@@ -577,6 +583,13 @@ class CardiacVolumeStitchingLogic(ScriptedLoadableModuleLogic):
         return finalTrs
 
     def mergeVolumesSITK(self, volumeList, transforms, referenceImage=None):
+        """
+        Merges volumes using provided transforms through a weighted average
+        :param volumeList: List of SimpleITK images
+        :param transforms: List of SImpleITK Transforms
+        :param referenceImage: SimpleITK image, reference image for resampling
+        :return:
+        """
 
         bounds = np.zeros((len(volumeList), 6))
         for i, im in enumerate(volumeList):
@@ -660,6 +673,7 @@ class CardiacVolumeStitchingLogic(ScriptedLoadableModuleLogic):
         """
         Generates a mask using 1-max threshold to identify only areas with information from ultrasound volumes
         :param image: SimpleITK image
+        :param erosionRadius: radius of erosion filter to be applied to mask
         :return: binary mask as SimpleITK image
         """
         minmax = sitk.MinimumMaximumImageFilter()
@@ -682,7 +696,7 @@ class CardiacVolumeStitchingLogic(ScriptedLoadableModuleLogic):
         """
         Gets the bounds of an image in LPS space (SimpleITK space). Takes optional transform.
         :param sitkImage: The input image
-        :param tr: Optional transform
+        :param transform: Optional transform
         :param inv: Invert transform?
         :param masked: Masked image to include only area with data?
         :return: bounds in form [minX, maxX, minY, maxY, minZ, maxZ]
@@ -763,7 +777,7 @@ class CardiacVolumeStitchingLogic(ScriptedLoadableModuleLogic):
         Transform should be defined as transformation from final->initial.
         :param sitkImage: The image to resample
         :param tr: The transform to use for resampling
-        :param spacing: Desired output spacing. Needs to be same length as image dimensions.
+        :param refImage: Reference image to resample to
         :param interpolator: Resample interpolator to use
         :return: New SimpleITK Image resampled
         """
@@ -797,6 +811,13 @@ class CardiacVolumeStitchingLogic(ScriptedLoadableModuleLogic):
         return resample.Execute(sitkImage)
 
     def computeRefImage(self, volumeList, transforms, outputSpacing=0.4):
+        """
+        Calculates a reference image that includes the all transformed images provided using the given isotropic spacing
+        :param volumeList: List of SimpleITK images
+        :param transforms: List of SimpleITK Transforms
+        :param outputSpacing: Desired output spacing as a single number denoting isotropic spacing
+        :return:
+        """
 
         bounds = np.zeros((len(volumeList), 6))
         for i, im in enumerate(volumeList):
