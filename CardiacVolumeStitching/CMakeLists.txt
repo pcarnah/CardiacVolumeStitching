@@ -8,6 +8,9 @@ set(MODULE_PYTHON_SCRIPTS
 
 set(MODULE_PYTHON_RESOURCES
   Resources/Icons/${MODULE_NAME}.png
+  Resources/RegistrationParameters/Par0001Rigid.txt
+  Resources/RegistrationParameters/Par0001NonRigid.txt
+  Resources/RegistrationParameters/Par0001RigidTest.txt
   )
 
 #-----------------------------------------------------------------------------

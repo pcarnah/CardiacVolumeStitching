@@ -572,7 +572,7 @@ class CardiacVolumeStitchingLogic(ScriptedLoadableModuleLogic):
 
         return finalTrs
 
-    def mergeVolumesSITK(self, volumeList, transforms, referenceImage):
+    def mergeVolumesSITK(self, volumeList, transforms, referenceImage=None):
 
         bounds = np.zeros((len(volumeList), 6))
         for i, im in enumerate(volumeList):
@@ -610,13 +610,24 @@ class CardiacVolumeStitchingLogic(ScriptedLoadableModuleLogic):
 
         alphaSumIm = sitk.Image(refImage)
 
-        filtDim = sitk.FFTPad(sitk.BinShrink(refImage, [2,2,2])).GetSize()
-
-        filters = MonogenicSignal.MonogenicFilters(filtDim, [outputSpacing * 2] * 3, [6, 12, 24, 32])
-
         # for each volume, resample into output space
         for i, im in enumerate(volumeList):
             start = timer()
+
+
+            # Get the oriented symmetry map for this volume
+            start = timer()
+            shrink = sitk.FFTPad(sitk.BinShrink(im, [2, 2, 2]))
+            filters = MonogenicSignal.MonogenicFilters(shrink.GetSize(), shrink.GetSpacing(), [6, 12, 24, 32])
+            volume = sitk.GetArrayFromImage(shrink)
+
+            mono = filters.getMonogenicSignal(np.swapaxes(volume, 0, 2))
+            orientedSym = sitk.GetImageFromArray(np.swapaxes(mono.orientedSymmetry()[3], 0, 2))
+            orientedSym.CopyInformation(shrink)
+            end = timer()
+            print("compute oriented symmetry: {}".format(end - start))
+
+            orientedSym = self.getResampledImage(orientedSym,  transforms[i], refImage, sitk.sitkLinear)
 
             # Resample the image to the output space
             resIm = self.getResampledImage(sitk.Cast(im, sitk.sitkFloat32), transforms[i], refImage, sitk.sitkLinear)
@@ -630,24 +641,6 @@ class CardiacVolumeStitchingLogic(ScriptedLoadableModuleLogic):
             mask = sitk.Cast(mask, sitk.sitkFloat32)
             end = timer()
             print("generate mask: {}".format(end - start))
-
-            # Get the oriented symmetry map for this volume
-            gauss = sitk.SmoothingRecursiveGaussian(resIm, 1.0)
-            shrink = sitk.FFTPad(sitk.BinShrink(resIm, [2,2,2]))
-            volume = sitk.GetArrayFromImage(shrink)
-
-            start = timer()
-            mono = filters.getMonogenicSignal(np.swapaxes(volume, 0, 2))
-            end = timer()
-            print("compute monogenic signal: {}".format(end - start))
-
-            start = timer()
-            orientedSym = sitk.GetImageFromArray(np.swapaxes(mono.orientedSymmetry()[3], 0, 2))
-            orientedSym.CopyInformation(shrink)
-            end = timer()
-            print("compute oriented symmetry: {}".format(end - start))
-
-            orientedSym = self.getResampledImage(orientedSym, sitk.Transform(), refImage, sitk.sitkLinear)
 
             # Get probe position for volume in IJK space
             probeOriginLPS = [(bounds[i, j * 2] + bounds[i, j * 2 + 1]) / 2 for j in range(3)]
