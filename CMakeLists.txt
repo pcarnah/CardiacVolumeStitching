@@ -21,6 +21,7 @@ include(${Slicer_USE_FILE})
 # Extension modules
 add_subdirectory(CardiacVolumeStitching)
 add_subdirectory(MonogenicFilter)
+add_subdirectory(CVSAlgorithms)
 ## NEXT_MODULE
 
 #-----------------------------------------------------------------------------
