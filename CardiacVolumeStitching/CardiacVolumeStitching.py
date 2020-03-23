@@ -436,8 +436,6 @@ class CardiacVolumeStitchingLogic(ScriptedLoadableModuleLogic):
         masks = [self.generateMask(im) for im in volumes]
         fixedMask = self.generateMask(fixed)
 
-        # for i, im in enumerate(volumes):
-        #     sitk.WriteImage(im, "D:/pcarnahanfiles/VolumeStitching/DataFromMehdi/01/Testing/Original-IM{:03d}.mhd".format(i+1))
 
         if not parMap:
             parMap = self._parameterMaps[0]
@@ -467,10 +465,6 @@ class CardiacVolumeStitchingLogic(ScriptedLoadableModuleLogic):
 
                 volumes[i] = self.getResampledImage(movingVolume, tr)
                 masks[i] = self.generateMask(volumes[i])
-
-                sitk.WriteImage(volumes[i],
-                                "D:/pcarnahanfiles/VolumeStitching/DataFromMehdi/01/Testing/Cycle{}-IM{:03d}.mhd".format(
-                                    cycle, i + 1))
 
                 trs[i].AddTransform(tr)
 
