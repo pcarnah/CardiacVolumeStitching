@@ -160,20 +160,19 @@ void vtkSlicerCVSAlgorithmsLogic::testImage(vtkMRMLNode* node)
 	reg->SetNumberOfFixedImages(1);
 	reg->SetNumberOfFixedImagePyramids(1);
 	reg->SetNumberOfFixedImageRegions(1);
-	reg->SetNumberOfMovingImages(1);
-	reg->SetNumberOfMovingImagePyramids(1);
+	reg->SetNumberOfMovingImages(5);
+	reg->SetNumberOfMovingImagePyramids(5);
 	reg->SetNumberOfLevels(4);
-	reg->SetGlobalIterations(1);
+	reg->SetGlobalIterations(2);
 	reg->SetNumberOfInterpolators(1);
 
 	//Add fixed image
 	reg->SetFixedImage(myitkImage);
 	reg->SetFixedImagePyramid(ImagePyramidType::New());
 	reg->SetFixedImageRegion(myitkImage->GetLargestPossibleRegion());
-	reg->SetTransform(TransformType::New());
 
 	OptimizerType::Pointer optimizer = OptimizerType::New();
-	optimizer->SetNumberOfIterations(50);
+	optimizer->SetNumberOfIterations(100);
 
 	itk::Array<double> scales(6);
 	scales[0] = 5000;
@@ -187,16 +186,16 @@ void vtkSlicerCVSAlgorithmsLogic::testImage(vtkMRMLNode* node)
 	optimizer->SetLearningRate(20);
 
 	CombinationMetricType::Pointer combinationMetric = CombinationMetricType::New();
-	combinationMetric->SetNumberOfMetrics(1);
+	combinationMetric->SetNumberOfMetrics(5);
 	combinationMetric->SetUseAllMetrics();
 	combinationMetric->SetMetricWeight(1, 0);
 
 	
-	for (int i = 0; i < 1; i++) {
+	for (int i = 0; i < 5; i++) {
 		MetricType::Pointer m = MetricType::New();
 		m->SetImageSampler(ImageSamplerType::New());
 		m->SetRequiredRatioOfValidSamples(0.05);
-		m->GetImageSampler()->SetNumberOfSamples(30000);
+		m->GetImageSampler()->SetNumberOfSamples(5000);
 
 		combinationMetric->SetMetric(m, i);
 
@@ -208,6 +207,7 @@ void vtkSlicerCVSAlgorithmsLogic::testImage(vtkMRMLNode* node)
 		reg->SetMovingImage(duplicator->GetOutput(), i);
 		reg->SetMovingImagePyramid(ImagePyramidType::New(), i);
 		reg->SetInterpolator(InterpolatorType::New(), i);
+		reg->SetTransform(TransformType::New(), i);
 	}
 
 	reg->SetInitialTransformParameters(reg->GetTransform()->GetParameters());

@@ -89,7 +89,7 @@ public:
   typedef std::vector< MaskConstPointer >                       MaskVectorType;
   typedef std::vector< InputImageRegionType >                   InputImageRegionVectorType;
   typedef itk::Transform<double, 3U, 3U>                        TransformType;
-  typedef typename TransformType::ConstPointer                  TransformConstPointer;
+  typedef typename TransformType::Pointer                       TransformPointer;
 
   /** ******************** Masks ******************** */
 
@@ -163,8 +163,8 @@ public:
     return true;
   }
 
-  itkSetConstObjectMacro(InputImageForwardTransform, TransformType);
-  itkGetConstObjectMacro(InputImageForwardTransform, TransformType);
+  itkSetObjectMacro(InputImageForwardTransform, TransformType);
+  itkGetObjectMacro(InputImageForwardTransform, TransformType);
 
 
   /** Get a handle to the cropped InputImageregion. */
@@ -231,7 +231,7 @@ private:
   InputImageRegionType       m_InputImageRegion;
   InputImageRegionVectorType m_InputImageRegionVector;
   unsigned int               m_NumberOfInputImageRegions;
-  TransformConstPointer      m_InputImageForwardTransform;
+  TransformPointer           m_InputImageForwardTransform;
 
   InputImageRegionType m_CroppedInputImageRegion;
   InputImageRegionType m_DummyInputImageRegion;

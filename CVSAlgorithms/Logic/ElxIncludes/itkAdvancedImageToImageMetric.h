@@ -291,6 +291,9 @@ public:
   virtual void BeforeThreadedGetValueAndDerivative(
     const TransformParametersType & parameters ) const;
 
+  itkSetObjectMacro(FixedImageForwardTransform, AdvancedTransformType);
+  itkGetConstObjectMacro(FixedImageForwardTransform, AdvancedTransformType);
+
 protected:
 
   /** Constructor. */
@@ -357,6 +360,7 @@ protected:
   bool m_TransformIsAdvanced;
   typename AdvancedTransformType::Pointer m_AdvancedTransform;
   mutable bool m_TransformIsBSpline;
+  typename AdvancedTransformType::Pointer m_FixedImageForwardTransform;
 
   /** Variables for the Limiters. */
   FixedImageLimiterPointer     m_FixedImageLimiter;

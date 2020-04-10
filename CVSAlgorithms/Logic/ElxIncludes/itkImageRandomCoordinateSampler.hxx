@@ -69,7 +69,7 @@ ImageRandomCoordinateSampler< TInputImage >
   typename ImageSampleContainerType::Pointer sampleContainer = this->GetOutput();
   typename InterpolatorType::Pointer interpolator            = this->GetModifiableInterpolator();
 
-  TransformConstPointer forwardTransform = this->GetInputImageForwardTransform();
+  TransformPointer forwardTransform = this->GetInputImageForwardTransform();
 
 
   /** Set up the interpolator. */
@@ -288,7 +288,7 @@ ImageRandomCoordinateSampler< TInputImage >
     /** Convert to point */
     inputImage->TransformContinuousIndexToPhysicalPoint( sampleCIndex, samplePoint );
 
-    TransformConstPointer forwardTransform = this->GetInputImageForwardTransform();
+    TransformPointer forwardTransform = this->GetInputImageForwardTransform();
     if (forwardTransform.IsNotNull())
     {
       samplePoint = forwardTransform->TransformPoint(samplePoint);

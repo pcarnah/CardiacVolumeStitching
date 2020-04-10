@@ -139,6 +139,7 @@ namespace itk
 {
 
 itkImplementationSetObjectMacro2( Transform, , TransformType );
+itkImplementationSetObjectMacro1( FixedImageForwardTransform, , TransformType );
 itkImplementationSetObjectMacro1( Interpolator, , InterpolatorType );
 itkImplementationSetObjectMacro2( FixedImageMask, , FixedImageMaskType );
 itkImplementationSetObjectMacro2( MovingImageMask, , MovingImageMaskType );
@@ -146,6 +147,7 @@ itkImplementationSetObjectMacro1( FixedImage, const, FixedImageType );
 itkImplementationSetObjectMacro1( MovingImage, const, MovingImageType );
 
 itkImplementationGetConstObjectMacro2( Transform, TransformType );
+itkImplementationGetConstObjectMacro1( FixedImageForwardTransform, TransformType );
 itkImplementationGetConstObjectMacro1( Interpolator, InterpolatorType );
 itkImplementationGetConstObjectMacro2( FixedImageMask, FixedImageMaskType );
 itkImplementationGetConstObjectMacro2( MovingImageMask, MovingImageMaskType );

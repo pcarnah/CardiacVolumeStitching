@@ -369,6 +369,7 @@ AdvancedImageToImageMetric< TFixedImage, TMovingImage >
     this->m_ImageSampler->SetInput( this->m_FixedImage );
     this->m_ImageSampler->SetMask( this->m_FixedImageMask );
     this->m_ImageSampler->SetInputImageRegion( this->GetFixedImageRegion() );
+    this->m_ImageSampler->SetInputImageForwardTransform( this->m_FixedImageForwardTransform);
   }
 
 } // end InitializeImageSampler()

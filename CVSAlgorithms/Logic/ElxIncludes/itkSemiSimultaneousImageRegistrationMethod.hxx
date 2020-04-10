@@ -74,43 +74,40 @@ namespace itk {
 	{
 		this->CheckOnInitialize();
 
-		//using ResampleImageType = itk::ResampleImageFilter<TMovingImage, TMovingImage>;
-		//ResampleImageType::Pointer resample = ResampleImageType::New();
-		//resample->SetInterpolator(this->GetInterpolator());
-		//resample->SetSize(this->GetFixedImageRegion().GetSize());
-		//resample->SetInput(this->GetFixedImagePyramid()->GetOutput(this->GetCurrentLevel()));
-		//
-		//LinearTransformPointer inverse = LinearTransformType::New();
-		//LinearTransformPointer transform = dynamic_cast<LinearTransformType *>(this->GetTransform(this->GetCurrentVolume()));
-
-		//if (transform.IsNotNull()) {
-		//	bool success = transform->GetInverse(inverse.GetPointer());
-		//	std::cout << "Invertible: " << success << std::endl;
-
-		//	resample->SetTransform(inverse);
-		//	resample->Update();
-		//}
-
 		
 		/** Setup the metric. */
 		this->GetCombinationMetric()->SetTransform(this->GetModifiableTransform(this->GetCurrentVolume()));
 
 		this->GetCombinationMetric()->SetFixedImage(
-			this->GetFixedImagePyramid()->GetOutput(this->GetCurrentLevel()));
-		for (unsigned int i = 0; i < this->GetNumberOfFixedImagePyramids(); ++i)
-		{
-			this->GetCombinationMetric()->SetFixedImage(
-				this->GetFixedImagePyramid(i)->GetOutput(this->GetCurrentLevel()), i);
-		}
-
+			this->GetFixedImagePyramid()->GetOutput(this->GetCurrentLevel()), 0);
+		
+		// Set the moving image for this step
 		this->GetCombinationMetric()->SetMovingImage(
 			this->GetMovingImagePyramid(this->GetCurrentVolume())->GetOutput(this->GetCurrentLevel()));
+
+		// Set remainder of moving images as fixed
+		unsigned int idx = 1;
 		for (unsigned int i = 0; i < this->GetNumberOfMovingImagePyramids(); ++i)
 		{
 			if (i != this->GetCurrentVolume())
 			{
-				this->GetCombinationMetric()->SetMovingImage(
-					this->GetMovingImagePyramid(i)->GetOutput(this->GetCurrentLevel()), i);
+				// Set this moving image as a fixed image for this step
+				this->GetCombinationMetric()->SetFixedImage(
+					this->GetMovingImagePyramid(i)->GetOutput(this->GetCurrentLevel()), idx++);
+
+				// Set the forward transform for this image
+				LinearTransformPointer inverse = LinearTransformType::New();
+				LinearTransformPointer transform = dynamic_cast<LinearTransformType *>(this->GetTransform(this->GetCurrentVolume()));
+
+				if (transform.IsNotNull()) {
+					bool success = transform->GetInverse(inverse.GetPointer());
+				}
+				else
+				{
+					itkExceptionMacro(<< "Transform must be linear");
+				}
+
+				this->GetCombinationMetric()->SetFixedImageForwardTransform(inverse, 0);
 			}
 		}
 
@@ -136,8 +133,6 @@ namespace itk {
 		this->GetModifiableOptimizer()->SetInitialPosition(
 			this->GetTransform(this->GetCurrentVolume())->GetParameters());
 
-		cout << this->GetInitialTransformParametersOfNextLevel() << endl;
-		cout << this->GetTransform()->GetParameters() << endl << endl;
 
 		/** Connect the transform to the Decorator. */
 		TransformOutputType *transformOutput = static_cast<TransformOutputType *>(this->ProcessObject::GetOutput(0));
@@ -203,6 +198,8 @@ namespace itk {
 				{
 					//Set current moving image
 					this->SetCurrentVolume(i);
+
+					std::cout << "Starting Volume " << i << " in Cycle " << cycle << " at resolution " << currentLevel << std::endl;
 
 					try
 					{
