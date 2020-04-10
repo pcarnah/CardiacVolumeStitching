@@ -258,5 +258,5 @@ class MonogenicFilterTest(ScriptedLoadableModuleTest):
 
         volumeNode = slicer.util.getNode(pattern="FA")
         logic = MonogenicFilterLogic()
-        self.assertIsNotNone(logic.hasImageData(volumeNode))
+        self.assertIsNotNone(logic.run(volumeNode, slicer.mrmlScene.AddNewNodeByClass('vtkMRMLScalarVolumeNode')))
         self.delayDisplay('Test passed!')

@@ -649,7 +649,7 @@ class CardiacVolumeStitchingLogic(ScriptedLoadableModuleLogic):
             end = timer()
             print("generate mask: {}".format(end - start))
 
-            structureIm = self.getResampledImage(structureIm, tr, refImage, sitk.sitkLinear) * mask
+            structureIm = self.getResampledImage(structureIm, transforms[i], refImage, sitk.sitkLinear) * mask
             # sitkUtils.PushVolumeToSlicer(structureIm)
 
             # TODO Balance power of distance vs structure to enhance image quality
@@ -837,6 +837,36 @@ class CardiacVolumeStitchingLogic(ScriptedLoadableModuleLogic):
         refImage.SetDirection([-1.0, 0.0, 0.0, 0.0, -1.0, 0.0, 0.0, 0.0, 1.0])
 
         return refImage
+
+    def sequenceToSITKImage(self, sequenceNodeID):
+        """
+        Takes a Sequence Node and extracts the frames to form a 4D SimpleITK Image
+        :param sequenceNodeID: Id of the sequence MRML node
+        :return: 4D SimpleITK Image equivalent to sequence
+        """
+
+        seqNode = slicer.mrmlScene.GetNodeByID(sequenceNodeID)
+        numberOfDataNodes = seqNode.GetNumberOfDataNodes()
+
+        # Set up browser
+        seqBrowser = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLSequenceBrowserNode")
+        slicer.modules.sequencebrowser.logic().AddSynchronizedNode(seqNode, None, seqBrowser)
+
+        seqBrowser.SetAndObserveMasterSequenceNodeID(seqNode.GetID())
+
+        # Get proxy nodes and generate masks
+        proxyNode = seqBrowser.GetProxyNode(seqNode)
+
+        vectorOfImages = sitk.VectorOfImage()
+
+        for seqItemNumber in range(numberOfDataNodes):
+            seqBrowser.SetSelectedItemNumber(seqItemNumber)
+            slicer.modules.sequencebrowser.logic().UpdateProxyNodesFromSequences(seqBrowser)
+
+            im = sitkUtils.PullVolumeFromSlicer(proxyNode)
+            vectorOfImages.push_back(sitk.Cast(im, sitk.sitkUInt16))
+
+        return sitk.JoinSeries(vectorOfImages)
 
 
 class CardiacVolumeStitchingTest(ScriptedLoadableModuleTest):

@@ -10,6 +10,7 @@ set(${KIT}_INCLUDE_DIRECTORIES
 	${vtkSlicerSequenceBrowserModuleMRML_INCLUDE_DIRS}
 	${vtkSlicerSequencesModuleLogic_INCLUDE_DIRS}  
 	${vtkSlicerSequenceBrowserModuleLogic_INCLUDE_DIRS}
+	ElxIncludes
   )
 
 set(${KIT}_SRCS
@@ -33,3 +34,7 @@ SlicerMacroBuildModuleLogic(
   SRCS ${${KIT}_SRCS}
   TARGET_LIBRARIES ${${KIT}_TARGET_LIBRARIES}
   )
+  
+ if(BUILD_TESTING)
+  add_subdirectory(Testing)
+endif()

@@ -5,11 +5,6 @@ set(MODULE_TITLE ${MODULE_NAME})
 
 string(TOUPPER ${MODULE_NAME} MODULE_NAME_UPPER)
 
-find_package(ITK REQUIRED)
-include(${ITK_USE_FILE})
-
-find_package(Sequences REQUIRED)
-
 #-----------------------------------------------------------------------------
 add_subdirectory(Logic)
 
