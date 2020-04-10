@@ -47,7 +47,7 @@ ImageRandomSampler< TInputImage >
   InputImageConstPointer inputImage = this->GetInput();
   typename ImageSampleContainerType::Pointer sampleContainer = this->GetOutput();
 
-  TransformConstPointer forwardTransform = this->GetInputImageForwardTransform();
+  TransformPointer forwardTransform = this->GetInputImageForwardTransform();
 
   /** Reserve memory for the output. */
   sampleContainer->Reserve( this->GetNumberOfSamples() );
@@ -210,7 +210,7 @@ ImageRandomSampler< TInputImage >
     inputImage->TransformIndexToPhysicalPoint( positionIndex,
       ( *iter ).Value().m_ImageCoordinates );
 
-	TransformConstPointer forwardTransform = this->GetInputImageForwardTransform();
+	TransformPointer forwardTransform = this->GetInputImageForwardTransform();
 	if (forwardTransform.IsNotNull())
 	{
 		(*iter).Value().m_ImageCoordinates =

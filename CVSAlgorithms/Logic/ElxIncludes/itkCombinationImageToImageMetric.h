@@ -256,6 +256,25 @@ public:
   }
 
 
+  /** Pass a forward transform for the fixed image to a specific metric
+   * 
+   */
+  virtual void SetFixedImageForwardTransform( TransformType * _arg, unsigned int pos );
+
+  virtual void SetFixedImageForwardTransform(TransformType * _arg) override;
+
+  /** Returns the fixed forward transform set in a specific metric. If the submetric is a
+   * singlevalued costfunction a zero pointer will be returned.
+   */
+  virtual const TransformType * GetFixedImageForwardTransform( unsigned int pos ) const;
+
+  /** Return Fixed Forward Transform 0 */
+  virtual const TransformType * GetFixedImageForwardTransform( void ) const override
+  {
+    return this->GetFixedImageForwardTransform( 0 );
+  }
+
+
   /** Pass the interpolator to all sub metrics. */
   void SetInterpolator( InterpolatorType * _arg ) override;
 
