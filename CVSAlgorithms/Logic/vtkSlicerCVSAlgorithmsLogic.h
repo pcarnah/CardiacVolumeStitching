@@ -50,7 +50,7 @@ public:
 
   void testImage(vtkMRMLNode* node);
   void testWrapping();
-  void stitchSequences(std::vector<std::string> sequences, vtkMRMLNode* outputSequence, vtkMRMLNode* masterSequence);
+  void stitchSequences(std::vector<std::string> sequences, vtkMRMLNode* outputSequence, vtkMRMLNode* masterSequence); 
 
 protected:
   vtkSlicerCVSAlgorithmsLogic();
