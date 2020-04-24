@@ -322,38 +322,45 @@ class CardiacVolumeStitchingLogic(ScriptedLoadableModuleLogic):
             logging.debug("stitchSequences: Missing argument")
             return
 
-        nodes = [slicer.mrmlScene.GetNodeByID(id) for id in sequences]
+        sequenceIds = [ID for ID in sequences]
 
-        # Clear output sequence
-        outputSequence.RemoveAllDataNodes()
-        outputSequence.SetIndexType(masterSequence.GetIndexType())
-        outputSequence.SetIndexName(masterSequence.GetIndexName())
-        outputSequence.SetIndexUnit(masterSequence.GetIndexUnit())
+        masterSequenceID = masterSequence.GetID()
 
-        # Set up browser
-        seqBrowser = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLSequenceBrowserNode")
-        for n in nodes:
-            slicer.modules.sequencebrowser.logic().AddSynchronizedNode(n, None, seqBrowser)
+        if masterSequenceID not in sequenceIds:
+            sequenceIds.append()
+            masterIdx = len(sequenceIds) - 1
+        else:
+            masterIdx = sequenceIds.index(masterSequenceID)
 
-        if masterSequence not in nodes:
-            slicer.modules.sequencebrowser.logic().AddSynchronizedNode(masterSequence, None, seqBrowser)
-        seqBrowser.SetAndObserveMasterSequenceNodeID(masterSequence.GetID())
+        # # Set up browser
+        # seqBrowser = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLSequenceBrowserNode")
+        # for n in nodes:
+        #     slicer.modules.sequencebrowser.logic().AddSynchronizedNode(n, None, seqBrowser)
+        #
+        # if masterSequence not in nodes:
+        #     slicer.modules.sequencebrowser.logic().AddSynchronizedNode(masterSequence, None, seqBrowser)
+        # seqBrowser.SetAndObserveMasterSequenceNodeID(masterSequence.GetID())
+        #
+        # # Get proxy nodes and generate masks
+        # proxyNodes = [seqBrowser.GetProxyNode(n) for n in nodes]
 
-        # Create temporary volume for output
-        outputVolume = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLScalarVolumeNode")
-
-        # Get proxy nodes and generate masks
-        proxyNodes = [seqBrowser.GetProxyNode(n) for n in nodes]
+        images = self.sequenceListToSITKImages(sequences, masterIdx)
+        outputImages = []
+        numberOfDataNodes = len(images)
 
         try:
             qt.QApplication.setOverrideCursor(qt.Qt.WaitCursor)
-            numberOfDataNodes = masterSequence.GetNumberOfDataNodes()
+            # numberOfDataNodes = masterSequence.GetNumberOfDataNodes()
 
-            # Initially register from frame 2 (slightly after r-wave, usually gives better alignment)
-            seqBrowser.SetSelectedItemNumber(2)
-            slicer.modules.sequencebrowser.logic().UpdateProxyNodesFromSequences(seqBrowser)
+            # # Initially register from frame 2 (slightly after r-wave, usually gives better alignment)
+            # seqBrowser.SetSelectedItemNumber(2)
+            # slicer.modules.sequencebrowser.logic().UpdateProxyNodesFromSequences(seqBrowser)
 
-            sitkIms = [sitkUtils.PullVolumeFromSlicer(n) for n in proxyNodes]
+            # sitkIms = [sitkUtils.PullVolumeFromSlicer(n) for n in proxyNodes]
+            if(numberOfDataNodes > 2):
+                sitkIms = images[2]
+            else:
+                sitkIms = images[1]
 
             # Apply positional initialization and align centers for maximum overlap to begin automatic registration
             initTrs = [sitk.Transform(self._initializationPresetTransforms[presets[i]]) for i, _ in enumerate(sitkIms)]
@@ -367,43 +374,30 @@ class CardiacVolumeStitchingLogic(ScriptedLoadableModuleLogic):
             #
             # Performs non-rigid registration to account for
             # small deviations using rigid registration for initialization
-            for seqItemNumber in range(numberOfDataNodes):
+            # for seqItemNumber in range(numberOfDataNodes):
+            for sitkIms in images[:1]:
                 # for seqItemNumber in [0]:
-                print('Started frame: {0} of {1}'.format(seqItemNumber + 1, numberOfDataNodes))
+                # print('Started frame: {0} of {1}'.format(seqItemNumber + 1, numberOfDataNodes))
                 slicer.app.processEvents(qt.QEventLoop.ExcludeUserInputEvents)
-                seqBrowser.SetSelectedItemNumber(seqItemNumber)
-                slicer.modules.sequencebrowser.logic().UpdateProxyNodesFromSequences(seqBrowser)
+                # seqBrowser.SetSelectedItemNumber(seqItemNumber)
+                # slicer.modules.sequencebrowser.logic().UpdateProxyNodesFromSequences(seqBrowser)
 
                 # Register Volumes
 
-                sitkIms = [sitkUtils.PullVolumeFromSlicer(n) for n in proxyNodes]
+                # sitkIms = [sitkUtils.PullVolumeFromSlicer(n) for n in proxyNodes]
 
                 finalTrs = self.semiSimultaneousRegister(sitkIms, initialTrs=rigidTrs,
                                                          numCycles=1, parMap=self._parameterMaps[1])
 
                 outputImage = self.mergeVolumesSITK(sitkIms, finalTrs, refImage)
+                outputImages.append(outputImage)
 
-                sitkUtils.PushVolumeToSlicer(outputImage, outputVolume)
+                # print('Completed frame: {0} of {1}'.format(seqItemNumber + 1, numberOfDataNodes))
 
-                # Saved stitched result
-                outputSequence.SetDataNodeAtValue(outputVolume,
-                                                  seqBrowser.GetMasterSequenceNode().GetNthIndexValue(seqItemNumber))
-
-                print('Completed frame: {0} of {1}'.format(seqItemNumber + 1, numberOfDataNodes))
+            self.sitkImagesToSequence(outputImages, outputSequence, masterSequence)
 
         finally:
             qt.QApplication.restoreOverrideCursor()
-
-            # Clean up temporary nodes
-            slicer.mrmlScene.RemoveNode(outputVolume)
-            seqBrowser.RemoveAllSequenceNodes()
-            slicer.mrmlScene.RemoveNode(seqBrowser)
-
-            # Create sequence browser for output if it does not already exist
-            if not slicer.modules.sequencebrowser.logic().GetFirstBrowserNodeForSequenceNode(outputSequence):
-                outputSequenceBrowser = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLSequenceBrowserNode",
-                                                                           outputSequence.GetName() + ' browser')
-                slicer.modules.sequencebrowser.logic().AddSynchronizedNode(outputSequence, None, outputSequenceBrowser)
 
         return
 
@@ -636,6 +630,7 @@ class CardiacVolumeStitchingLogic(ScriptedLoadableModuleLogic):
                                     sitk.IntensityWindowing(orientedSym, 0, 1, 0, 25), sitk.sitkFloat32)
             structureIm = sitk.IntensityWindowing((distance + structureIm), 1, 40, 0.05, 5)
 
+            start = timer()
             # Resample the image to the output space
             resIm = self.getResampledImage(sitk.Cast(im, sitk.sitkFloat32), transforms[i], refImage, sitk.sitkLinear)
 
@@ -649,7 +644,7 @@ class CardiacVolumeStitchingLogic(ScriptedLoadableModuleLogic):
             end = timer()
             print("generate mask: {}".format(end - start))
 
-            structureIm = self.getResampledImage(structureIm, tr, refImage, sitk.sitkLinear) * mask
+            structureIm = self.getResampledImage(structureIm, transforms[i], refImage, sitk.sitkLinear) * mask
             # sitkUtils.PushVolumeToSlicer(structureIm)
 
             # TODO Balance power of distance vs structure to enhance image quality
@@ -837,6 +832,71 @@ class CardiacVolumeStitchingLogic(ScriptedLoadableModuleLogic):
         refImage.SetDirection([-1.0, 0.0, 0.0, 0.0, -1.0, 0.0, 0.0, 0.0, 1.0])
 
         return refImage
+
+    def sequenceListToSITKImages(self, sequenceNodeIDs, master=0):
+        """
+        Takes a list of Sequence Nodes and extracts the frames to form a 4D SimpleITK Image
+        :param sequenceNodeIDs: Ids of the sequence MRML nodes
+        :param master: Optional index of master sequence
+        :return: List of 4D SimpleITK Images equivalent to sequences
+        """
+
+        seqNodes = [slicer.mrmlScene.GetNodeByID(id) for id in sequenceNodeIDs]
+        masterNode = seqNodes[master]
+        numberOfDataNodes = masterNode.GetNumberOfDataNodes()
+
+        # Set up browser
+        seqBrowser = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLSequenceBrowserNode")
+        for n in seqNodes:
+            slicer.modules.sequencebrowser.logic().AddSynchronizedNode(n, None, seqBrowser)
+
+        seqBrowser.SetAndObserveMasterSequenceNodeID(masterNode.GetID())
+
+        # Get proxy nodes and generate masks
+        proxyNodes = [seqBrowser.GetProxyNode(n) for n in seqNodes]
+
+        images = []
+
+        for seqItemNumber in range(numberOfDataNodes):
+            seqBrowser.SetSelectedItemNumber(seqItemNumber)
+            slicer.modules.sequencebrowser.logic().UpdateProxyNodesFromSequences(seqBrowser)
+
+            sitkIms = [sitkUtils.PullVolumeFromSlicer(n) for n in proxyNodes]
+            images.append(sitkIms)
+
+        # Clean up temporary nodes
+        slicer.mrmlScene.RemoveNode(seqBrowser)
+        for p in proxyNodes:
+            slicer.mrmlScene.RemoveNode(p)
+
+        return images
+
+    def sitkImagesToSequence(self, images, outputSequence, masterSequence):
+        # Clear output sequence
+        outputSequence.RemoveAllDataNodes()
+        outputSequence.SetIndexType(masterSequence.GetIndexType())
+        outputSequence.SetIndexName(masterSequence.GetIndexName())
+        outputSequence.SetIndexUnit(masterSequence.GetIndexUnit())
+
+        # Create temporary volume for output
+        outputVolume = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLScalarVolumeNode")
+
+        for i, image in enumerate(images):
+            sitkUtils.PushVolumeToSlicer(image, outputVolume)
+
+            # Saved stitched result
+            outputSequence.SetDataNodeAtValue(outputVolume,
+                                              masterSequence.GetNthIndexValue(i))
+
+        # Clean up temporary nodes
+        slicer.mrmlScene.RemoveNode(outputVolume)
+
+        # Create sequence browser for output if it does not already exist
+        if not slicer.modules.sequencebrowser.logic().GetFirstBrowserNodeForSequenceNode(outputSequence):
+            outputSequenceBrowser = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLSequenceBrowserNode",
+                                                                       outputSequence.GetName() + ' Browser')
+            slicer.modules.sequencebrowser.logic().AddSynchronizedNode(outputSequence, None, outputSequenceBrowser)
+
 
 
 class CardiacVolumeStitchingTest(ScriptedLoadableModuleTest):
