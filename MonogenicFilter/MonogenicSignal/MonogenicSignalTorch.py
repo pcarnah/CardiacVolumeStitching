@@ -22,7 +22,6 @@ class MonogenicFilters:
         :param yzise: Y dimension
         :param zsize: Z dimension
         :param wl_xy: Spatial wavelengths for x,y dims
-        :param wl_z:  Spatial wavelenths for z dim
         """
 
         sigmaOnf = 0.5
@@ -54,7 +53,6 @@ class MonogenicFilters:
         else:
             zmax = zmid
 
-        start = timer()
         # Create the grid for the filter
         xGrid, yGrid, zGrid = np.meshgrid(range(-xmid, xmax + 1), range(-ymid, ymax + 1), range(-zmid, zmax + 1))
         xGrid = xGrid.transpose([1, 0, 2])
@@ -65,28 +63,19 @@ class MonogenicFilters:
         yGrid = np.fft.ifftshift(yGrid)
         zGrid = np.fft.ifftshift(zGrid)
 
-        end = timer()
-        print("Time1: {}".format(end - start))
 
         xGrid = torch.as_tensor(xGrid / self.xsize, device=device)
         yGrid = torch.as_tensor(yGrid / self.ysize, device=device)
         zGrid = torch.as_tensor(zGrid / self.zsize, device=device)
 
-        end = timer()
-        print("Time2: {}".format(end - start))
-
         xGrid2 = xGrid ** 2
         yGrid2 = yGrid ** 2
         zGrid2 = zGrid ** 2
 
-        end = timer()
-        print("Time3: {}".format(end - start))
 
         # Construct the filter -  first calculate the radial filter component
-        w0 = 1.0 / torch.as_tensor(wl_xy, dtype=torch.float32, device=device)  # Centre frequency of spatial filter.
+        w0 = 1.0 / torch.as_tensor(wl_xy, dtype=torch.float64, device=device)  # Centre frequency of spatial filter.
 
-        end = timer()
-        print("Time4: {}".format(end - start))
 
         # Determine the spatial regions to use
         w = torch.sqrt(xGrid2.unsqueeze(len(size)).expand((*xGrid.shape, self.numFilt)) / ((w0 / spacing[0]) ** 2)
@@ -94,14 +83,10 @@ class MonogenicFilters:
                        + zGrid2.unsqueeze(len(size)).expand((*xGrid.shape, self.numFilt)) / ((w0 / spacing[2]) ** 2))
         w[0, 0, 0, :] = 1  # Avoids division by zero
 
-        end = timer()
-        print("Time5: {}".format(end - start))
 
         # Computation of 3D log-gabor filter across the volumetric range
         self.bpFilt = torch.exp((-(torch.log(w)) ** 2) / (2 * np.log(sigmaOnf) ** 2))
 
-        end = timer()
-        print("Time6: {}".format(end - start))
 
         # Set the DC value of the filter
         self.bpFilt[0, 0, 0, :] = 0
@@ -117,20 +102,17 @@ class MonogenicFilters:
         self.bpFilt = self.bpFilt / torch.max(sumFilt[:])
         self.bpFilt = torch.nn.functional.pad(self.bpFilt[:, :, :, :, None], [0, 1], "constant", 0)
 
-        end = timer()
-        print("Time7: {}".format(end - start))
 
         # Generate the Riesz filter components (i.e. the odd filter whose components are imaginary)
         w = torch.sqrt(yGrid2 + xGrid2 + zGrid2)
         w[0, 0, 0] = 1
-        self.ReiszFilt03 = torch.zeros((*size, 2), dtype=torch.float32, device=device)
-        self.ReiszFilt12 = torch.zeros((*size, 2), dtype=torch.float32, device=device)
+        self.ReiszFilt03 = torch.zeros((*size, 2), dtype=torch.float64, device=device)
+        self.ReiszFilt12 = torch.zeros((*size, 2), dtype=torch.float64, device=device)
 
         self.ReiszFilt03[:,:,:,0] = 1 - (zGrid / w)
-        self.ReiszFilt12[:,:,:,0] = (xGrid - yGrid) / w
+        self.ReiszFilt12[:, :, :, 1] = xGrid / w
+        self.ReiszFilt12[:, :, :, 0] = -yGrid / w
 
-        end = timer()
-        print("Time8: {}".format(end - start))
 
     def getMonogenicSignal(self, volume):
         return self.MonogenicSignal(volume, self)
@@ -152,13 +134,21 @@ class MonogenicFilters:
             F = torch.fft(V, 3)
 
             # Filter using the Reisz filter
-            R_03 = F * monogenic_filter.ReiszFilt03
-            R_12 = F * monogenic_filter.ReiszFilt12
+            def complex_mult(A,B):
+                R = torch.empty_like(A)
+
+                R[:,:,:,0] = A.select(-1,0) * B.select(-1,0) - A.select(-1,1) * B.select(-1,1)
+                R[:,:,:,1] = A.select(-1,1) * B.select(-1,0) + A.select(-1,0) * B.select(-1,1)
+                return R
+
+
+            R_03 = complex_mult(F, monogenic_filter.ReiszFilt03)
+            R_12 = complex_mult(F, monogenic_filter.ReiszFilt12)
 
             # Compute the parts of the monogenic signal
             for flt in range(monogenic_filter.numFilt):
-                t1 = R_03 * monogenic_filter.bpFilt[:, :, :, flt, :]
-                t2 = R_12 * monogenic_filter.bpFilt[:, :, :, flt, :]
+                t1 = complex_mult(R_03, monogenic_filter.bpFilt[:, :, :, flt, :])
+                t2 = complex_mult(R_12, monogenic_filter.bpFilt[:, :, :, flt, :])
                 F03 = torch.ifft(t1, 3)
                 F12 = torch.ifft(t2, 3)
                 self.Fm1[:, :, :, flt] = F03[:,:,:,0]
@@ -202,7 +192,7 @@ class MonogenicFilters:
 
         def localOrientation(self):
             epsilon = np.finfo(float).eps
-            LO = torch.zeros((3, *self.shape))
+            LO = torch.empty((3, *self.shape), dtype=torch.float32, device=device)
 
             denominator = self.odd + epsilon
             LO[0, :, :, :, :] = self.Fm2 / denominator
@@ -245,15 +235,18 @@ class MonogenicFilters:
 
 
 if __name__ == "__main__":
-    shape = (200,200,200)
-    spacing = [1,1,1]
+    np.random.seed(10)
+    a = np.random.rand(200,200,200)
+
+    shape = a.shape
+    spacing = [1, 1, 1]
     start = timer()
     filt = MonogenicFilters(shape, spacing, [10, 20, 30, 40, 50])
     end = timer()
     print("Time: {}".format(end - start))
 
     start = timer()
-    mono = filt.getMonogenicSignal(np.ones(shape))
+    mono = filt.getMonogenicSignal(a)
     end = timer()
     print("Time: {}".format(end - start))
 

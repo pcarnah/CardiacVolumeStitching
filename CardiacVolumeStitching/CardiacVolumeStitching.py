@@ -16,7 +16,7 @@ from six.moves import range
 import SimpleITK as sitk
 import sitkUtils
 import SimpleElastix
-from MonogenicSignal import MonogenicSignal
+from MonogenicSignal import MonogenicSignalTorch as MonogenicSignal
 from timeit import default_timer as timer
 
 

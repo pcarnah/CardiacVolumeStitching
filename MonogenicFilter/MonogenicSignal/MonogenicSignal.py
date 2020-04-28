@@ -105,6 +105,7 @@ class MonogenicFilters:
         self.ReiszFilt03 = 1 - (zGrid / w)
         self.ReiszFilt12 = (1j * xGrid - yGrid) / w
 
+
     def getMonogenicSignal(self, volume):
         return self.MonogenicSignal(volume, self)
 
@@ -137,7 +138,7 @@ class MonogenicFilters:
                 self.Fm3[:, :, :, flt] = np.imag(F12)
                 self.Fm4[:, :, :, flt] = np.imag(F03)
 
-            self.odd = np.zeros(self.shape)
+            self.odd = np.zeros(self.shape, dtype='float32')
             np.sqrt(self.Fm2 ** 2 + self.Fm3 ** 2 + self.Fm4 ** 2, self.odd)
 
             self.even = np.abs(self.Fm1)
@@ -174,7 +175,7 @@ class MonogenicFilters:
 
         def localOrientation(self):
             epsilon = np.finfo(float).eps
-            LO = np.zeros((3, *self.shape))
+            LO = np.zeros((3, *self.shape), dtype='float32')
 
             denominator = self.odd + epsilon
             LO[0, :, :, :, :] = self.Fm2 / denominator
@@ -219,7 +220,10 @@ class MonogenicFilters:
 if __name__ == "__main__":
     print(np.__mkl_version__)
 
-    shape = (200,200,200)
+    np.random.seed(10)
+    a = np.random.rand(200,200,200)
+
+    shape = a.shape
     spacing = [1,1,1]
     start = timer()
     filt = MonogenicFilters(shape, spacing, [10, 20, 30, 40, 50])
@@ -227,7 +231,7 @@ if __name__ == "__main__":
     print("Time: {}".format(end - start))
 
     start = timer()
-    mono = filt.getMonogenicSignal(np.ones(shape))
+    mono = filt.getMonogenicSignal(a)
     end = timer()
     print("Time: {}".format(end - start))
 
