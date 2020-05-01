@@ -332,31 +332,14 @@ class CardiacVolumeStitchingLogic(ScriptedLoadableModuleLogic):
         else:
             masterIdx = sequenceIds.index(masterSequenceID)
 
-        # # Set up browser
-        # seqBrowser = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLSequenceBrowserNode")
-        # for n in nodes:
-        #     slicer.modules.sequencebrowser.logic().AddSynchronizedNode(n, None, seqBrowser)
-        #
-        # if masterSequence not in nodes:
-        #     slicer.modules.sequencebrowser.logic().AddSynchronizedNode(masterSequence, None, seqBrowser)
-        # seqBrowser.SetAndObserveMasterSequenceNodeID(masterSequence.GetID())
-        #
-        # # Get proxy nodes and generate masks
-        # proxyNodes = [seqBrowser.GetProxyNode(n) for n in nodes]
-
         images = self.sequenceListToSITKImages(sequences, masterIdx)
         outputImages = []
         numberOfDataNodes = len(images)
 
         try:
             qt.QApplication.setOverrideCursor(qt.Qt.WaitCursor)
-            # numberOfDataNodes = masterSequence.GetNumberOfDataNodes()
 
-            # # Initially register from frame 2 (slightly after r-wave, usually gives better alignment)
-            # seqBrowser.SetSelectedItemNumber(2)
-            # slicer.modules.sequencebrowser.logic().UpdateProxyNodesFromSequences(seqBrowser)
-
-            # sitkIms = [sitkUtils.PullVolumeFromSlicer(n) for n in proxyNodes]
+            # Initially register from frame 2 (slightly after r-wave, usually gives better alignment)
             if(numberOfDataNodes > 2):
                 sitkIms = images[2]
             else:
@@ -370,22 +353,15 @@ class CardiacVolumeStitchingLogic(ScriptedLoadableModuleLogic):
             rigidTrs = self.semiSimultaneousRegister(sitkIms, initialTrs=initTrs, numCycles=5)
 
             refImage = self.computeRefImage(sitkIms, rigidTrs)
-            # Loop through sequence browser
+
+            # Loop through sequences
             #
             # Performs non-rigid registration to account for
             # small deviations using rigid registration for initialization
-            # for seqItemNumber in range(numberOfDataNodes):
-            for sitkIms in images[:1]:
-                # for seqItemNumber in [0]:
-                # print('Started frame: {0} of {1}'.format(seqItemNumber + 1, numberOfDataNodes))
+            for sitkIms in images:
                 slicer.app.processEvents(qt.QEventLoop.ExcludeUserInputEvents)
-                # seqBrowser.SetSelectedItemNumber(seqItemNumber)
-                # slicer.modules.sequencebrowser.logic().UpdateProxyNodesFromSequences(seqBrowser)
 
                 # Register Volumes
-
-                # sitkIms = [sitkUtils.PullVolumeFromSlicer(n) for n in proxyNodes]
-
                 finalTrs = self.semiSimultaneousRegister(sitkIms, initialTrs=rigidTrs,
                                                          numCycles=1, parMap=self._parameterMaps[1])
 

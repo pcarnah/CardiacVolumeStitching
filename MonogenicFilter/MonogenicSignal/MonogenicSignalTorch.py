@@ -53,25 +53,28 @@ class MonogenicFilters:
         else:
             zmax = zmid
 
-        # Create the grid for the filter
-        xGrid, yGrid, zGrid = np.meshgrid(range(-xmid, xmax + 1), range(-ymid, ymax + 1), range(-zmid, zmax + 1))
-        xGrid = xGrid.transpose([1, 0, 2])
-        yGrid = yGrid.transpose([1, 0, 2])
-        zGrid = zGrid.transpose([1, 0, 2])
+        XR = torch.empty(self.xsize, dtype=torch.long, device=device)
+        XR[:xmax + 1] = torch.arange(xmax + 1)
+        XR[xmax + 1:] = torch.arange(-xmid, 0)
 
-        xGrid = np.fft.ifftshift(xGrid)
-        yGrid = np.fft.ifftshift(yGrid)
-        zGrid = np.fft.ifftshift(zGrid)
+        YR = torch.empty(self.ysize, dtype=torch.long, device=device)
+        YR[:ymax + 1] = torch.arange(ymax + 1)
+        YR[ymax + 1:] = torch.arange(-ymid, 0)
+
+        ZR = torch.empty(self.zsize, dtype=torch.long, device=device)
+        ZR[:zmax + 1] = torch.arange(zmax + 1)
+        ZR[zmax + 1:] = torch.arange(-zmid, 0)
 
 
-        xGrid = torch.as_tensor(xGrid / self.xsize, device=device)
-        yGrid = torch.as_tensor(yGrid / self.ysize, device=device)
-        zGrid = torch.as_tensor(zGrid / self.zsize, device=device)
+        xGrid, yGrid, zGrid = torch.meshgrid([XR, YR, ZR])
 
-        xGrid2 = xGrid ** 2
-        yGrid2 = yGrid ** 2
-        zGrid2 = zGrid ** 2
+        xGrid = xGrid.type(torch.float64) / self.xsize
+        yGrid = yGrid.type(torch.float64) / self.ysize
+        zGrid = zGrid.type(torch.float64) / self.zsize
 
+        xGrid2 = (xGrid ** 2)
+        yGrid2 = (yGrid ** 2)
+        zGrid2 = (zGrid ** 2)
 
         # Construct the filter -  first calculate the radial filter component
         w0 = 1.0 / torch.as_tensor(wl_xy, dtype=torch.float64, device=device)  # Centre frequency of spatial filter.
@@ -82,7 +85,6 @@ class MonogenicFilters:
                        + yGrid2.unsqueeze(len(size)).expand((*xGrid.shape, self.numFilt)) / ((w0 / spacing[1]) ** 2)
                        + zGrid2.unsqueeze(len(size)).expand((*xGrid.shape, self.numFilt)) / ((w0 / spacing[2]) ** 2))
         w[0, 0, 0, :] = 1  # Avoids division by zero
-
 
         # Computation of 3D log-gabor filter across the volumetric range
         self.bpFilt = torch.exp((-(torch.log(w)) ** 2) / (2 * np.log(sigmaOnf) ** 2))
@@ -104,10 +106,11 @@ class MonogenicFilters:
 
 
         # Generate the Riesz filter components (i.e. the odd filter whose components are imaginary)
-        w = torch.sqrt(yGrid2 + xGrid2 + zGrid2)
+        w = torch.sqrt(xGrid2 + yGrid2 + zGrid2)
         w[0, 0, 0] = 1
-        self.ReiszFilt03 = torch.zeros((*size, 2), dtype=torch.float64, device=device)
-        self.ReiszFilt12 = torch.zeros((*size, 2), dtype=torch.float64, device=device)
+
+        self.ReiszFilt03 = torch.zeros((*xGrid.shape, 2), dtype=torch.float64, device=device)
+        self.ReiszFilt12 = torch.zeros((*xGrid.shape, 2), dtype=torch.float64, device=device)
 
         self.ReiszFilt03[:,:,:,0] = 1 - (zGrid / w)
         self.ReiszFilt12[:, :, :, 1] = xGrid / w
@@ -129,9 +132,9 @@ class MonogenicFilters:
             self.Fm4 = torch.zeros(self.shape, dtype=torch.float32, device=device)
 
             # Compute the 3-dimensional fast Fourier transform of the original image
-            V = torch.zeros((*volume.shape, 2), dtype=torch.float64, device=device)
-            V[:,:,:,0] = torch.as_tensor(volume, device=device)
-            F = torch.fft(V, 3)
+            V = torch.as_tensor(volume, device=device)
+            VC = torch.nn.functional.pad(V.unsqueeze(3), [0, 1], "constant", 0)
+            F = torch.fft(VC, 3)
 
             # Filter using the Reisz filter
             def complex_mult(A,B):
