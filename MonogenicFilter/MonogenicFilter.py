@@ -10,7 +10,7 @@ import vtk, qt, ctk, slicer
 from slicer.ScriptedLoadableModule import *
 import logging
 import numpy as np
-from MonogenicSignal import MonogenicSignal
+from MonogenicSignal import MonogenicSignalTorch as MonogenicSignal
 import sitkUtils
 import SimpleITK as sitk
 
@@ -182,10 +182,10 @@ class MonogenicFilterLogic(ScriptedLoadableModuleLogic):
         """
 
         im = sitkUtils.PullVolumeFromSlicer(inputVolume)
-        # shrink = sitk.SmoothingRecursiveGaussian(im, 1.0)
+        shrink = sitk.SmoothingRecursiveGaussian(im, 1.5)
 
-        shrink = sitk.FFTPad(sitk.BinShrink(im, [2, 2, 2]))
-        filters = MonogenicSignal.MonogenicFilters(shrink.GetSize(), shrink.GetSpacing(), [6, 12, 24, 32])
+        # shrink = sitk.FFTPad(sitk.BinShrink(im, [2, 2, 2]))
+        filters = MonogenicSignal.MonogenicFilters(shrink.GetSize(), shrink.GetSpacing(), [12, 24, 48, 64])
         volume = sitk.GetArrayFromImage(shrink)
 
         monogenic = filters.getMonogenicSignal(np.swapaxes(volume, 0, 2))
@@ -201,7 +201,7 @@ class MonogenicFilterLogic(ScriptedLoadableModuleLogic):
         if mode == MonogenicFilterLogic.FEATURE_SYMMETRY:
             outVolume, _ = monogenic.featureSymmetry()
         elif mode == MonogenicFilterLogic.LOCAL_ENERGY:
-            outVolume = monogenic.localEnergy()[:,:,:,2]
+            outVolume = np.mean(monogenic.localEnergy(), 3)
         elif mode == MonogenicFilterLogic.LOCAL_ORIENTATION:
             outVolume = monogenic.localOrientation()[:,:,:,:,2]
         elif mode == MonogenicFilterLogic.LOCAL_PHASE:
@@ -212,10 +212,16 @@ class MonogenicFilterLogic(ScriptedLoadableModuleLogic):
             logging.warning("Invalid mode.")
             return False
 
-        outImage = sitk.GetImageFromArray(np.swapaxes(outVolume, 0, 2))
-        outImage.CopyInformation(shrink)
+        if mode == MonogenicFilterLogic.LOCAL_ORIENTATION:
+            outImage = sitk.GetImageFromArray(np.transpose(outVolume, [3, 2, 1, 0]), True)
+            outImage.SetDirection(shrink.GetDirection())
+            outImage.SetOrigin(shrink.GetOrigin())
+            outImage.SetSpacing(shrink.GetSpacing())
+        else:
+            outImage = sitk.GetImageFromArray(np.swapaxes(outVolume, 0, 2))
+            outImage.CopyInformation(shrink)
 
-        outImage = sitk.Resample(outImage, im,  sitk.Transform(), sitk.sitkLinear)
+        # outImage = sitk.Resample(outImage, im,  sitk.Transform(), sitk.sitkLinear)
 
         outputVolume.CopyOrientation(inputVolume)
         # slicer.util.updateVolumeFromArray(outputVolume, outVolume)

@@ -824,7 +824,7 @@ class CardiacVolumeStitchingLogic(ScriptedLoadableModuleLogic):
         # Set up browser
         seqBrowser = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLSequenceBrowserNode")
         for n in seqNodes:
-            slicer.modules.sequencebrowser.logic().AddSynchronizedNode(n, None, seqBrowser)
+            slicer.modules.sequences.logic().AddSynchronizedNode(n, None, seqBrowser)
 
         seqBrowser.SetAndObserveMasterSequenceNodeID(masterNode.GetID())
 
@@ -835,7 +835,7 @@ class CardiacVolumeStitchingLogic(ScriptedLoadableModuleLogic):
 
         for seqItemNumber in range(numberOfDataNodes):
             seqBrowser.SetSelectedItemNumber(seqItemNumber)
-            slicer.modules.sequencebrowser.logic().UpdateProxyNodesFromSequences(seqBrowser)
+            slicer.modules.sequences.logic().UpdateProxyNodesFromSequences(seqBrowser)
 
             sitkIms = [sitkUtils.PullVolumeFromSlicer(n) for n in proxyNodes]
             images.append(sitkIms)
@@ -868,10 +868,10 @@ class CardiacVolumeStitchingLogic(ScriptedLoadableModuleLogic):
         slicer.mrmlScene.RemoveNode(outputVolume)
 
         # Create sequence browser for output if it does not already exist
-        if not slicer.modules.sequencebrowser.logic().GetFirstBrowserNodeForSequenceNode(outputSequence):
+        if not slicer.modules.sequences.logic().GetFirstBrowserNodeForSequenceNode(outputSequence):
             outputSequenceBrowser = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLSequenceBrowserNode",
                                                                        outputSequence.GetName() + ' Browser')
-            slicer.modules.sequencebrowser.logic().AddSynchronizedNode(outputSequence, None, outputSequenceBrowser)
+            slicer.modules.sequences.logic().AddSynchronizedNode(outputSequence, None, outputSequenceBrowser)
 
 
 
