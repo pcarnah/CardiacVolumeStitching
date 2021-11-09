@@ -16,7 +16,7 @@ from six.moves import range
 import SimpleITK as sitk
 import sitkUtils
 import SimpleElastix
-from MonogenicSignal import MonogenicSignalTorch as MonogenicSignal
+from MonogenicSignal import MonogenicSignal as MonogenicSignal
 from timeit import default_timer as timer
 
 
@@ -264,7 +264,8 @@ class CardiacVolumeStitchingLogic(ScriptedLoadableModuleLogic):
     """
 
     def __init__(self):
-        parameterSets = [['Par0001Rigid.txt'], ['Par0001NonRigid.txt'], ['Par0001RigidTest.txt']]
+        parameterSets = [['Par0001Rigid.txt'], ['Par0001NonRigid.txt'], ['Par0001RigidTest.txt'],
+                         ['Par0003RigidGroup.txt'],  ['Par0003NonRigidGroup.txt']]
 
         moduleDir = os.path.dirname(os.path.abspath(__file__))
         registrationResourcesDir = os.path.abspath(os.path.join(moduleDir, 'Resources', 'RegistrationParameters'))
@@ -350,7 +351,10 @@ class CardiacVolumeStitchingLogic(ScriptedLoadableModuleLogic):
             initTrs = self.initialAlignment(sitkIms, initialTrs=initTrs)
 
             # Perform semi-simultaneous rigid registration step
-            rigidTrs = self.semiSimultaneousRegister(sitkIms, initialTrs=initTrs, numCycles=5)
+            # rigidTrs = self.semiSimultaneousRegister(sitkIms, initialTrs=initTrs, numCycles=5)
+            rigidTrs = self.groupwiseRegister(sitkIms, initialTrs=initTrs)
+
+            print('Finished Rigid')
 
             refImage = self.computeRefImage(sitkIms, rigidTrs)
 
@@ -358,12 +362,13 @@ class CardiacVolumeStitchingLogic(ScriptedLoadableModuleLogic):
             #
             # Performs non-rigid registration to account for
             # small deviations using rigid registration for initialization
-            for sitkIms in images:
+            for sitkIms in images[:1]:
                 slicer.app.processEvents(qt.QEventLoop.ExcludeUserInputEvents)
 
                 # Register Volumes
-                finalTrs = self.semiSimultaneousRegister(sitkIms, initialTrs=rigidTrs,
-                                                         numCycles=1, parMap=self._parameterMaps[1])
+                # finalTrs = self.semiSimultaneousRegister(sitkIms, initialTrs=rigidTrs,
+                #                                          numCycles=1, parMap=self._parameterMaps[1])
+                finalTrs = self.groupwiseRegister(sitkIms, initialTrs=rigidTrs, parMap=self._parameterMaps[4])
 
                 outputImage = self.mergeVolumesSITK(sitkIms, finalTrs, refImage)
                 outputImages.append(outputImage)
@@ -377,6 +382,74 @@ class CardiacVolumeStitchingLogic(ScriptedLoadableModuleLogic):
 
         return
 
+    def groupwiseRegister(self, volumeList, initialTrs=None, parMap=None):
+
+        if not initialTrs:
+            initialTrs = [sitk.Transform() for _ in volumeList]
+
+        refImage = self.computeRefImage(volumeList, initialTrs)
+        volumeListResampled = [self.getResampledImage(im, tr, refImage=refImage) for im, tr in zip(volumeList, initialTrs)]
+
+
+        masks = [self.generateMask(im) for im in volumeListResampled]
+
+        vec = sitk.VectorOfImage()
+        for im in volumeListResampled:
+            vec.push_back(sitk.Cast(im, sitk.sitkFloat32))
+
+        maskVec = sitk.VectorOfImage()
+        for im in masks:
+            maskVec.push_back(im)
+
+        if not parMap:
+            parMap = self._parameterMaps[3]
+
+        image = sitk.JoinSeries(vec)
+        mask = sitk.JoinSeries(maskVec)
+
+        selx = SimpleElastix.ElastixImageFilter()
+        selx.SetFixedImage(image)
+        selx.SetMovingImage(image)
+        selx.SetMovingMask(mask)
+        selx.SetParameterMap(parMap)
+        selx.LogToConsoleOn()
+        selx.LogToFileOff()
+        selx.RemoveOutputDirectory()
+        selx.RemoveLogFileName()
+        selx.Execute()
+
+        trs = [sitk.CompositeTransform(3) for _ in range(len(volumeList))]
+        for i,tr in enumerate(initialTrs):
+            trs[i].AddTransform(tr)
+
+        trMap = selx.GetTransformParameterMap()[0]
+        if trMap['Transform'][0] == 'EulerStackTransform':
+            n = int(trMap['NumberOfSubTransforms'][0])
+            for i in range(n):
+                tr = sitk.Euler3DTransform()
+                tr.SetCenter([int(x) for x in trMap['CenterOfRotationPoint']])
+                tr.SetParameters([float(x) for x in trMap['TransformParameters'][6*i:6*i+6]])
+
+                trs[i].AddTransform(tr)
+        elif trMap['Transform'][0] == 'BSplineStackTransform':
+            n = int(trMap['NumberOfSubTransforms'][0])
+            nParams = int(trMap['NumberOfParameters'][0]) // n
+            dir = [int(x) for x in trMap['GridDirection']]
+            meshSize = [int(x) for x in trMap['GridSize']]
+            origin = [float(x) for x in trMap['GridOrigin']]
+            spacing = [float(x) for x in trMap['GridSpacing']]
+            fixedParams = [*meshSize, *origin[:3], *spacing[:3], *dir]
+            params = [float(x) for x in trMap['TransformParameters']]
+
+            for i in range(n):
+                tr = sitk.BSplineTransform(3)
+                tr.SetFixedParameters(fixedParams)
+                tr.SetParameters(params[nParams*i:nParams*i+nParams])
+
+                trs[i].AddTransform(tr)
+
+        return trs
+
     def semiSimultaneousRegister(self, volumeList, fixedVolume=0, initialTrs=None, numCycles=10, parMap=None):
         """
         Runs semi-simultaneous registration algorithm describe by Wachinger, C. et al., (2007). This method works by
@@ -389,17 +462,18 @@ class CardiacVolumeStitchingLogic(ScriptedLoadableModuleLogic):
         :return: List of transforms
         """
 
+        trs = [sitk.CompositeTransform(3) for _ in range(len(volumeList) - 1)]
+        fixedTr = sitk.CompositeTransform(3)
+
         if initialTrs:
             volumeList = [self.getResampledImage(im, tr) for im, tr in zip(volumeList, initialTrs)]
 
-            trs = initialTrs[0:fixedVolume] + initialTrs[fixedVolume + 1:]
+            moving_trs = initialTrs[0:fixedVolume] + initialTrs[fixedVolume + 1:]
 
-            # Make copies of transforms to avoid side effects
-            trs = [sitk.Transform(tr) for tr in trs]
-            fixedTr = sitk.Transform(initialTrs[fixedVolume])
-        else:
-            trs = [sitk.Transform() for _ in range(len(volumeList) - 1)]
-            fixedTr = sitk.Transform()
+            for i, tr in enumerate(moving_trs):
+                trs[i].AddTransform(tr)
+            fixedTr.AddTransform(initialTrs[fixedVolume])
+
 
         volumes = volumeList[0:fixedVolume] + volumeList[fixedVolume + 1:]
         fixed = volumeList[fixedVolume]
@@ -506,6 +580,12 @@ class CardiacVolumeStitchingLogic(ScriptedLoadableModuleLogic):
         conv.SetParameterMap(selx.GetTransformParameterMap()[0])
         tr = conv.Execute()
 
+        trType = selx.GetTransformParameterMap()[0]['Transform']
+        if 'EulerTransform' not in trType:
+            disp = sitk.TransformToDisplacementFieldFilter()
+            disp.SetReferenceImage(movingVolume)
+            tr = sitk.DisplacementFieldTransform(disp.Execute(tr))
+
         return resultImage, tr
 
     def initialAlignment(self, volumeList, fixedVolume=0, initialTrs=None):
@@ -541,7 +621,7 @@ class CardiacVolumeStitchingLogic(ScriptedLoadableModuleLogic):
 
         finalTrs = trs[0:fixedVolume] + [fixedTr] + trs[fixedVolume:]
         for tr in finalTrs:
-            tr.FlattenTransform()
+            # tr.FlattenTransform()
             tr.MakeUnique()
 
         return finalTrs

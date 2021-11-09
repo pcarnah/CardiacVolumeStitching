@@ -20,7 +20,7 @@
 
 (ErodeMask "false" )
 
-(NumberOfResolutions 4)
+(NumberOfResolutions 3)
 
 (HowToCombineTransforms "Compose")
 (AutomaticScalesEstimation "true")
@@ -31,7 +31,7 @@
 (ShowExactMetricValue "false")
 
 //Maximum number of iterations in each resolution level:
-(MaximumNumberOfIterations 200 150 100 75 )
+(MaximumNumberOfIterations 150 100 75 )
 
 //Number of grey level bins in each resolution level:
 (NumberOfHistogramBins 32 )

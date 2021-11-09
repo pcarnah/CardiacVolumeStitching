@@ -1,0 +1,55 @@
+//Image Types
+(FixedInternalImagePixelType "float")
+(MovingInternalImagePixelType "float")
+(FixedImageDimension 4)
+(MovingImageDimension 4)
+
+//Components
+(Registration "MultiResolutionRegistration")
+(Interpolator "ReducedDimensionBSplineInterpolator")
+(ResampleInterpolator "FinalReducedDimensionBSplineInterpolator")
+(Resampler "DefaultResampler")
+(BSplineInterpolationOrder 1)
+(FinalBSplineInterpolationOrder 3)
+(FixedImagePyramid "FixedSmoothingImagePyramid")
+(MovingImagePyramid "MovingSmoothingImagePyramid")
+(Metric "SumOfPairwiseCorrelationCoefficientsMetric")
+(Optimizer "AdaptiveStochasticGradientDescent")
+(HowToCombineTransforms "Compose")
+(Transform "BSplineStackTransform")
+
+
+//Mask
+(ErodeMask "false")
+(ErodeFixedMask "false")
+
+//Pyramid
+(NumberOfResolutions 1.000000)
+(ImagePyramidSchedule 2.000000 2.000000 2.000000 0.000000)
+(GridSpacingSchedule 2.0)
+
+//Optimizer
+(AutomaticParameterEstimation "true")
+(ASGDParameterEstimationMethod "Original")
+(MaximumNumberOfIterations 40.000000)
+(NumberOfJacobianMeasurements 20000)
+
+//Metric
+(SubtractMean "true")
+(MovingImageDerivativeScales 1.000000 1.000000 1.000000 0.000000)
+(FinalGridSpacingInPhysicalUnits 8)
+
+//Sampler
+(ImageSampler "Random")
+(CheckNumberOfSamples "true")
+(MaximumNumberOfSamplingAttempts 8.000000)
+(NewSamplesEveryIteration "true")
+(NumberOfSamplesForExactGradient 25000.000000)
+(NumberOfSpatialSamples 5000.000000)
+(RequiredRatioOfValidSamples 0.001000)
+
+//Output
+(DefaultPixelValue 0.000000)
+(ResultImageFormat "nii")
+(WriteIterationInfo "false")
+(WriteResultImage "false")

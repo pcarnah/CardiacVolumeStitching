@@ -10,7 +10,7 @@ import vtk, qt, ctk, slicer
 from slicer.ScriptedLoadableModule import *
 import logging
 import numpy as np
-from MonogenicSignal import MonogenicSignalTorch as MonogenicSignal
+from MonogenicSignal import MonogenicSignal as MonogenicSignal
 import sitkUtils
 import SimpleITK as sitk
 
