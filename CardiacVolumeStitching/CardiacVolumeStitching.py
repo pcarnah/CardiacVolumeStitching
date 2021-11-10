@@ -362,13 +362,16 @@ class CardiacVolumeStitchingLogic(ScriptedLoadableModuleLogic):
             #
             # Performs non-rigid registration to account for
             # small deviations using rigid registration for initialization
-            for sitkIms in images[:1]:
+            for sitkIms in images:
                 slicer.app.processEvents(qt.QEventLoop.ExcludeUserInputEvents)
 
                 # Register Volumes
                 # finalTrs = self.semiSimultaneousRegister(sitkIms, initialTrs=rigidTrs,
                 #                                          numCycles=1, parMap=self._parameterMaps[1])
                 finalTrs = self.groupwiseRegister(sitkIms, initialTrs=rigidTrs, parMap=self._parameterMaps[4])
+
+                for tr in finalTrs:
+                    tr.FlattenTransform()
 
                 outputImage = self.mergeVolumesSITK(sitkIms, finalTrs, refImage)
                 outputImages.append(outputImage)
@@ -423,6 +426,13 @@ class CardiacVolumeStitchingLogic(ScriptedLoadableModuleLogic):
             trs[i].AddTransform(tr)
 
         trMap = selx.GetTransformParameterMap()[0]
+        # conv = SimpleElastix.TransformConverter()
+        # conv.SetParameterMap(trMap)
+        # newTrs = conv.Execute()
+        #
+        # for i, tr in enumerate(newTrs):
+        #     trs[i].AddTransform(tr)
+
         if trMap['Transform'][0] == 'EulerStackTransform':
             n = int(trMap['NumberOfSubTransforms'][0])
             for i in range(n):
@@ -578,7 +588,7 @@ class CardiacVolumeStitchingLogic(ScriptedLoadableModuleLogic):
 
         conv = SimpleElastix.TransformConverter()
         conv.SetParameterMap(selx.GetTransformParameterMap()[0])
-        tr = conv.Execute()
+        tr = conv.Execute()[0]
 
         trType = selx.GetTransformParameterMap()[0]['Transform']
         if 'EulerTransform' not in trType:

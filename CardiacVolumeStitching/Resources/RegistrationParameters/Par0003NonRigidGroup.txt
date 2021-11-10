@@ -26,12 +26,12 @@
 //Pyramid
 (NumberOfResolutions 1.000000)
 (ImagePyramidSchedule 2.000000 2.000000 2.000000 0.000000)
-(GridSpacingSchedule 2.0)
+//(GridSpacingSchedule 2.0)
 
 //Optimizer
 (AutomaticParameterEstimation "true")
 (ASGDParameterEstimationMethod "Original")
-(MaximumNumberOfIterations 40.000000)
+(MaximumNumberOfIterations 20.000000)
 (NumberOfJacobianMeasurements 20000)
 
 //Metric
