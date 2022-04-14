@@ -18,6 +18,7 @@ import sitkUtils
 import SimpleElastix
 from MonogenicSignal import MonogenicSignal as MonogenicSignal
 from timeit import default_timer as timer
+from pathlib import Path
 
 
 #
@@ -328,7 +329,7 @@ class CardiacVolumeStitchingLogic(ScriptedLoadableModuleLogic):
         masterSequenceID = masterSequence.GetID()
 
         if masterSequenceID not in sequenceIds:
-            sequenceIds.append()
+            sequenceIds.append(masterSequenceID)
             masterIdx = len(sequenceIds) - 1
         else:
             masterIdx = sequenceIds.index(masterSequenceID)
@@ -351,8 +352,10 @@ class CardiacVolumeStitchingLogic(ScriptedLoadableModuleLogic):
             initTrs = self.initialAlignment(sitkIms, initialTrs=initTrs)
 
             # Perform semi-simultaneous rigid registration step
-            # rigidTrs = self.semiSimultaneousRegister(sitkIms, initialTrs=initTrs, numCycles=5)
-            rigidTrs = self.groupwiseRegister(sitkIms, initialTrs=initTrs)
+            rigidTrs = self.groupwiseRegister(sitkIms, initialTrs=initTrs,
+                                              parMap=self._parameterMaps[RegistrationPreset_GR_Rigid])
+            rigidTrs = self.semiSimultaneousRegister(sitkIms, initialTrs=rigidTrs, numCycles=2,
+                                                     parMap=self._parameterMaps[RegistrationPreset_SSR_Rigid])
 
             print('Finished Rigid')
 
@@ -362,21 +365,32 @@ class CardiacVolumeStitchingLogic(ScriptedLoadableModuleLogic):
             #
             # Performs non-rigid registration to account for
             # small deviations using rigid registration for initialization
-            for sitkIms in images:
+            for i, sitkIms in enumerate(images):
                 slicer.app.processEvents(qt.QEventLoop.ExcludeUserInputEvents)
 
                 # Register Volumes
-                # finalTrs = self.semiSimultaneousRegister(sitkIms, initialTrs=rigidTrs,
-                #                                          numCycles=1, parMap=self._parameterMaps[1])
-                finalTrs = self.groupwiseRegister(sitkIms, initialTrs=rigidTrs, parMap=self._parameterMaps[4])
+                finalTrs = self.semiSimultaneousRegister(sitkIms, initialTrs=rigidTrs,
+                                                         numCycles=1,
+                                                         parMap=self._parameterMaps[RegistrationPreset_SSR_NonRigid])
+                # finalTrs = self.groupwiseRegister(sitkIms, initialTrs=rigidTrs, parMap=self._parameterMaps[4])
 
-                for tr in finalTrs:
-                    tr.FlattenTransform()
+                # p = Path('D:/pcarnahanfiles/VolumeStitching/011 - Registration/TestTransforms/Frame{}'.format(i+1))
+                # p.mkdir(parents=True, exist_ok=True)
+                # for j, tr in enumerate(finalTrs):
+                #     # tr.FlattenTransform()
+                #     # fPath = p.joinpath('{}.tfm'.format(slicer.mrmlScene.GetNodeByID(sequences[j]).GetName()))
+                #     # sitk.WriteTransform(tr, str(fPath))
+                #     disp = sitk.TransformToDisplacementFieldFilter()
+                #     disp.SetReferenceImage(self.computeRefImage(sitkIms, finalTrs))
+                #     dsf = sitk.BinShrink(sitk.Cast(disp.Execute(tr), sitk.sitkVectorFloat32), [2, 2, 2])
+                #     fPath = p.joinpath('{}_Transform.nrrd'.format(slicer.mrmlScene.GetNodeByID(sequences[j]).GetName()))
+                #     sitk.WriteImage(dsf, str(fPath), useCompression=True)
+
 
                 outputImage = self.mergeVolumesSITK(sitkIms, finalTrs, refImage)
                 outputImages.append(outputImage)
 
-                # print('Completed frame: {0} of {1}'.format(seqItemNumber + 1, numberOfDataNodes))
+                print('Completed frame: {0} of {1}'.format(i + 1, numberOfDataNodes))
 
             self.sitkImagesToSequence(outputImages, outputSequence, masterSequence)
 
@@ -455,6 +469,11 @@ class CardiacVolumeStitchingLogic(ScriptedLoadableModuleLogic):
                 tr = sitk.BSplineTransform(3)
                 tr.SetFixedParameters(fixedParams)
                 tr.SetParameters(params[nParams*i:nParams*i+nParams])
+
+                ref = self.computeRefImage([volumeList[i]], [tr])
+                t2d = sitk.TransformToDisplacementFieldFilter()
+                t2d.SetReferenceImage(ref)
+                tr = sitk.DisplacementFieldTransform(t2d.Execute(tr))
 
                 trs[i].AddTransform(tr)
 
@@ -579,7 +598,7 @@ class CardiacVolumeStitchingLogic(ScriptedLoadableModuleLogic):
         if movingMask:
             selx.SetMovingMask(movingMask)
 
-        selx.LogToConsoleOn()
+        selx.LogToConsoleOff()
         selx.LogToFileOff()
         selx.RemoveOutputDirectory()
         selx.RemoveLogFileName()
@@ -657,6 +676,13 @@ class CardiacVolumeStitchingLogic(ScriptedLoadableModuleLogic):
 
             outputSpacing = refImage.GetSpacing()[0]
 
+        # halfRef = self.computeRefImage(volumeList, transforms, 0.8)
+        # t2Dsp = sitk.TransformToDisplacementFieldFilter()
+        # t2Dsp.SetReferenceImage(halfRef)
+        #
+        # for i, tr in enumerate(transforms):
+        #     transforms[i] = sitk.DisplacementFieldTransform(t2Dsp.Execute(tr))
+
         alphaSumIm = sitk.Image(refImage)
 
         # for each volume, resample into output space
@@ -690,15 +716,15 @@ class CardiacVolumeStitchingLogic(ScriptedLoadableModuleLogic):
                                                     squaredDistance=False, useImageSpacing=True)
             distance = sitk.Cast(distance, sitk.sitkFloat32)
             distance = sitk.InvertIntensity(sitk.RescaleIntensity(distance, 0, 10), 10)
-            distance = sitk.RescaleIntensity(distance ** 3, 1, 25)
+            distance = sitk.RescaleIntensity(distance ** 2, 1, 25)
 
             structureIm = sitk.Cast(sitk.IntensityWindowing(orientedSym, -1, 0, -10, 0) +
                                     sitk.IntensityWindowing(orientedSym, 0, 1, 0, 25), sitk.sitkFloat32)
-            structureIm = sitk.IntensityWindowing((distance + structureIm), 1, 40, 0.05, 5)
+            structureIm = sitk.IntensityWindowing((distance + structureIm), 1, 50, 0.05, 5)
 
             start = timer()
             # Resample the image to the output space
-            resIm = self.getResampledImage(sitk.Cast(im, sitk.sitkFloat32), transforms[i], refImage, sitk.sitkLinear)
+            resIm = self.getResampledImage(sitk.Cast(im, sitk.sitkFloat32), transforms[i], refImage, sitk.sitkBSpline)
 
             end = timer()
             print("resample: {}".format(end - start))
@@ -986,3 +1012,8 @@ class CardiacVolumeStitchingTest(ScriptedLoadableModuleTest):
 InitializationPresets_TEE = 0
 InitializationPresets_TG = 1
 InitializationPresets_TTE = 2
+
+RegistrationPreset_SSR_Rigid = 0
+RegistrationPreset_SSR_NonRigid = 1
+RegistrationPreset_GR_Rigid = 3
+RegistrationPreset_GR_NonRigid = 4

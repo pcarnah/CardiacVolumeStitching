@@ -17,7 +17,8 @@
 (Optimizer "AdaptiveStochasticGradientDescent")
 (HowToCombineTransforms "Compose")
 (Transform "EulerStackTransform")
-
+(AutomaticScalesEstimation "true")
+(AutomaticTransformInitialization "false")
 
 //Mask
 (ErodeMask "false")
@@ -31,7 +32,7 @@
 //Optimizer
 (AutomaticParameterEstimation "true")
 (ASGDParameterEstimationMethod "Original")
-(MaximumNumberOfIterations 2000.000000)
+(MaximumNumberOfIterations 1500.000000)
 (MaximumStepLength 4.000000 2.000000 1.000000 0.500000)
 
 //Metric
