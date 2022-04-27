@@ -40,8 +40,27 @@ add_subdirectory(MonogenicFilter)
 ## NEXT_MODULE
 
 #-----------------------------------------------------------------------------
+# Install SimpleElastix
+# 
+find_package(SimpleElastix)
+install(FILES 
+	${SimpleElastix_DIR}/Wrapping/Python/SimpleElastix.py
+	${SimpleElastix_DIR}/Wrapping/Python/_SimpleElastix.pyd
+	${SimpleElastix_DIR}/Wrapping/Python/__init__.py
+DESTINATION ${Slicer_THIRDPARTY_LIB_DIR}/qt-scripted-modules/SimpleElastix/
+COMPONENT RuntimeLibraries
+)
+
+install(DIRECTORY
+	${SimpleElastix_RUNTIME_DIRS}/$<CONFIG>/
+DESTINATION ${Slicer_THIRDPARTY_LIB_DIR}/qt-scripted-modules/SimpleElastix/
+COMPONENT RuntimeLibraries
+)
+
+#-----------------------------------------------------------------------------
+# Install directory, install project name, install component, and install subdirectory.
 set(EXTENSION_CPACK_INSTALL_CMAKE_PROJECTS)
-#list(APPEND EXTENSION_CPACK_INSTALL_CMAKE_PROJECTS "${Foo_DIR};Foo;RuntimeLibraries;/")
+#list(APPEND EXTENSION_CPACK_INSTALL_CMAKE_PROJECTS "${elastix_DIR};elastix;RuntimeLibraries;/")
 set(${EXTENSION_NAME}_CPACK_INSTALL_CMAKE_PROJECTS "${EXTENSION_CPACK_INSTALL_CMAKE_PROJECTS}" CACHE STRING "List of external projects to install" FORCE)
 
 #-----------------------------------------------------------------------------
