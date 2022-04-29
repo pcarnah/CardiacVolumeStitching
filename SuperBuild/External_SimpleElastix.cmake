@@ -29,7 +29,7 @@ if(NOT DEFINED ${proj}_DIR AND NOT ${CMAKE_PROJECT_NAME}_USE_SYSTEM_${proj})
     BINARY_DIR ${proj}-build
     INSTALL_DIR ${${proj}_INSTALL_DIR}
     GIT_REPOSITORY "${git_protocol}://github.com/pcarnah/SimpleElastix.git"
-    #GIT_TAG "6203da1c80752dbe84f1cdf82dad2cce0aecd203"
+    #GIT_TAG "4e3bf31b7997d26bbd904c18a9882188d4368790"
     #--Patch step-------------
     PATCH_COMMAND ""
     #--Configure step-------------
