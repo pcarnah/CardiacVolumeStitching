@@ -11,6 +11,8 @@ set(MODULE_PYTHON_RESOURCES
   Resources/RegistrationParameters/Par0001Rigid.txt
   Resources/RegistrationParameters/Par0001NonRigid.txt
   Resources/RegistrationParameters/Par0001RigidTest.txt
+  Resources/RegistrationParameters/Par0003RigidGroup.txt
+  Resources/RegistrationParameters/Par0003NonRigidGroup.txt
   )
 
 #-----------------------------------------------------------------------------
