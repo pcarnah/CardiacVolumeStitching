@@ -14,6 +14,13 @@ Valve Procedure Planning. Appl. Sci.
 
 This module is configured as a Superbuild which includes dependencies Elastix and SimpleElastix. Tested on Slicer version 4.13.0 2022-04-24.
 
+### Usage
+
+Load the acquired sequences into Slicer (Transgastric and mid-esophogeal as described in paper). From Cardiac Volume Stitching module, select input sequences using the dropdown and + and - buttons. The position of the acquisitions can be set in the volume list. Select the sequence to use as the master sequence for the purpose of the timing of the sequence frames. Select or create a sequence to hold the output, and click apply to proceed with proccessing.
+
+<div align="center">
+    <img src="/Screenshot.PNG" width="800px"</img> 
+</div>
 
 ### Build instructions
 
