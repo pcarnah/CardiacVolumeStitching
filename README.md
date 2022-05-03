@@ -12,7 +12,8 @@ Volume Compounding for Mitral
 Valve Procedure Planning. Appl. Sci.
 2022, 12, 4562. https://doi.org/10.3390/app12094562
 
-This module is configured as a Superbuild which includes depencies Elastix and SimpleElastix. Tested on Slicer version 4.13.0 2022-04-24.
+This module is configured as a Superbuild which includes dependencies Elastix and SimpleElastix. Tested on Slicer version 4.13.0 2022-04-24.
+
 
 ### Build instructions
 
@@ -26,10 +27,10 @@ cmake --build . --config Release
 To install, navigate into the inner-build directory, optionally configure CMake with the desired install location, and build the INSTALL target.
 ```
 cmake -DCMAKE_INSTALL_PREFIX="%BUILD_FOLDER%/SER-install" .
-cmake --build . --config Release -- -m --target INSTALL
+cmake --build . --config Release --target INSTALL
 ```
 
 A compressed package that can be installed via the Slicer extension manager can also be created using the PACKAGE target
 ```
-cmake --build . --config Release -- -m --target PACKAGE
+cmake --build . --config Release --target PACKAGE
 ```
